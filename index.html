@@ -1,14 +1,1467 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control de Almacén - En Línea</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- Conexión a Google Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen font-sans text-slate-800">
+
+  <!-- BARRA SUPERIOR DE ESTADO DE LA NUBE -->
+  <div class="bg-slate-900 text-white text-xs py-1.5 px-4 flex justify-between items-center">
+    <span>📦 Sistema de Almacén en Tiempo Real</span>
+    <span id="estado-nube" class="font-bold text-amber-400">⏳ Conectando a la nube...</span>
+  </div>
+
+  <!-- PANTALLA 1: INICIO DE SESIÓN -->
+  <div id="pantalla-login" class="flex items-center justify-center min-h-[90vh] p-4">
+    <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-200">
+      <h1 class="text-2xl font-bold text-center text-blue-700 mb-2">📦 Control de Almacén</h1>
+      <p class="text-center text-slate-500 mb-6 text-sm">Selecciona tu usuario para entrar</p>
+      
+      <label class="block text-sm font-bold mb-2">Usuario:</label>
+      <select id="login-usuario" class="w-full p-3 border rounded-lg mb-4 bg-slate-50 text-base font-semibold"></select>
+      
+      <label class="block text-sm font-bold mb-2">PIN / Contraseña:</label>
+      <input type="password" id="login-pin" placeholder="••••" class="w-full p-3 border rounded-lg mb-6 text-lg text-center tracking-widest">
+      
+      <button onclick="iniciarSesion()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl text-lg transition shadow-lg">
+        Entrar al Sistema
+      </button>
+    </div>
+  </div>
+
+  <!-- PANTALLA 2: PANEL DE ADMINISTRADOR -->
+  <div id="pantalla-admin" class="hidden max-w-6xl mx-auto p-4 md:p-6">
+    <div class="flex flex-wrap justify-between items-center gap-3 bg-white p-4 rounded-xl shadow mb-6">
+      <div>
+        <h1 class="text-xl font-bold text-blue-800">Panel de Administrador</h1>
+        <p id="subtitulo-admin" class="text-sm text-slate-500">Gestión total del almacén</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="mostrarResumenTurno()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 px-4 py-2 rounded-lg font-bold text-sm shadow">
+          📊 Resumen / Cerrar Turno
+        </button>
+        <button onclick="salirPantallaLogin()" class="bg-red-100 text-red-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-red-200">
+          Cerrar Sesión
+        </button>
+      </div>
+    </div>
+
+    <!-- BANNER DE ALARMA VISUAL -->
+    <div id="banner-alertas-admin" class="hidden mb-6 p-4 rounded-xl border-l-8 border-red-600 bg-red-50 text-red-800 shadow-sm"></div>
+
+    <div class="grid md:grid-cols-2 gap-6 mb-6">
+      <!-- CAJA 1: IMPORTAR / EXPORTAR EXCEL Y AGREGAR MANUAL -->
+      <div class="space-y-6">
+        <div class="bg-white p-6 rounded-xl shadow">
+          <h2 class="text-lg font-bold mb-1">📥 Cargar Archivo (Excel/CSV)</h2>
+          <p class="text-xs text-slate-500 mb-4">Acepta columnas <b>ID, Producto y Cantidad</b> (o solo Producto y Cantidad). Si el ID ya existe, se pondrá vigente la cantidad del archivo.</p>
+          
+          <input type="file" id="archivo-excel" accept=".xlsx, .xls, .csv" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 mb-4"/>
+          
+          <div class="flex gap-2">
+            <button onclick="procesarExcel()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-bold text-sm flex-1">
+              Subir y Actualizar Stock
+            </button>
+            <button onclick="descargarPlantilla()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm">
+              Descargar Plantilla
+            </button>
+          </div>
+        </div>
+
+        <!-- AGREGAR PRODUCTO MANUALMENTE (ADMIN) -->
+        <div class="bg-white p-6 rounded-xl shadow border-t-4 border-blue-500">
+          <h2 class="text-lg font-bold mb-2">➕ Agregar Producto / Entrada Manual</h2>
+          <p class="text-xs text-slate-500 mb-3">Crea un producto nuevo o selecciona uno existente para sumarle stock.</p>
+          <div class="flex flex-col gap-3">
+            <input type="text" id="manual-admin-nombre" list="lista-nombres-productos" placeholder="Escribe nombre nuevo o selecciona existente..." class="border p-2.5 rounded-lg w-full">
+            <div class="flex gap-2">
+              <input type="number" id="manual-admin-cant" placeholder="Cantidad" min="1" class="border p-2.5 rounded-lg flex-1">
+              <button onclick="agregarManual('admin')" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-bold">
+                Guardar / Sumar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CAJA 2: GESTIÓN DE USUARIOS Y PERMISOS -->
+      <div class="bg-white p-6 rounded-xl shadow flex flex-col">
+        <h2 class="text-lg font-bold mb-2">👷 Gestión de Usuarios y Permisos</h2>
+        <p class="text-xs text-slate-500 mb-3">Crea nuevos usuarios o modifica nombre, contraseña (PIN) y permisos abajo.</p>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-4 bg-slate-50 p-3 rounded-lg border">
+          <input type="text" id="nuevo-nombre" placeholder="Nombre" class="border p-2 rounded-lg sm:col-span-2 text-sm">
+          <input type="text" id="nuevo-pin" placeholder="PIN" class="border p-2 rounded-lg text-center text-sm">
+          <select id="nuevo-rol" class="border p-2 rounded-lg text-sm bg-white">
+            <option value="estibador">Estibador</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button onclick="crearUsuario()" class="bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold text-sm sm:col-span-4">
+            + Crear Usuario
+          </button>
+        </div>
+
+        <div class="text-xs font-bold text-slate-400 mb-1 uppercase">Usuarios Registrados (Edita y presiona 💾):</div>
+        <div id="lista-usuarios" class="space-y-2 overflow-y-auto max-h-60 pr-1"></div>
+      </div>
+    </div>
+
+    <!-- TABLA DE INVENTARIO ACTUAL (CON OPCIÓN DE BORRADO TOTAL SOLO ADMIN) -->
+    <div class="bg-white p-6 rounded-xl shadow mb-6">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+        <div>
+          <h2 class="text-lg font-bold">📦 Inventario Actual</h2>
+          <p class="text-xs text-slate-500">Alarma visual: <span class="text-red-600 font-bold">Rojo = 0 (Agotado)</span> | <span class="text-amber-600 font-bold">Amarillo = 5 o menos (Por agotarse)</span></p>
+        </div>
+        <div class="flex flex-col sm:flex-row w-full md:w-auto gap-2">
+          <input type="text" id="buscador-admin" oninput="renderizarAdmin()" placeholder="🔍 Buscar producto o ID..." class="w-full md:w-72 p-2.5 border-2 border-blue-200 rounded-xl text-sm">
+          <button onclick="eliminarTodoInventario()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow flex items-center justify-center gap-1.5 whitespace-nowrap">
+            🗑️ Borrar Todo el Inventario
+          </button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="bg-slate-100 border-b text-sm">
+              <th class="p-3">ID</th>
+              <th class="p-3">Producto</th>
+              <th class="p-3">Estado / Alarma</th>
+              <th class="p-3">Cantidad Vigente (Editar)</th>
+              <th class="p-3 text-right">Eliminar</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-inventario-admin"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- HISTORIAL DE MOVIMIENTOS (ADMIN CON FILTRO DE FECHAS Y AGRUPACIÓN) -->
+    <div class="bg-white p-6 rounded-xl shadow">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+        <div>
+          <h2 class="text-lg font-bold">📋 Historial de Movimientos</h2>
+          <p id="contador-movs-admin" class="text-xs text-slate-500">Mostrando todos los movimientos</p>
+        </div>
+        <div class="flex flex-wrap items-end gap-2 bg-slate-50 p-2.5 rounded-xl border text-xs w-full md:w-auto">
+          <div>
+            <label class="block font-bold text-slate-600 mb-1">📅 Desde:</label>
+            <input type="date" id="fecha-desde-admin" onchange="renderizarAdmin()" class="border p-1.5 rounded-lg bg-white">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-600 mb-1">📅 Hasta:</label>
+            <input type="date" id="fecha-hasta-admin" onchange="renderizarAdmin()" class="border p-1.5 rounded-lg bg-white">
+          </div>
+          <button onclick="filtrarHoy('admin')" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-3 py-2 rounded-lg">Hoy</button>
+          <button onclick="limpiarFiltroFechas('admin')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-3 py-2 rounded-lg">Ver Todos</button>
+          <button id="btn-agrupar-admin" onclick="alternarAgrupacionHistorial('admin')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-2 rounded-lg shadow">
+            📦 Agrupado por Producto
+          </button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto max-h-96">
+        <table class="w-full text-left border-collapse text-sm">
+          <thead>
+            <tr class="bg-slate-100 border-b">
+              <th class="p-2">Fecha/Hora</th>
+              <th class="p-2">Usuario(s)</th>
+              <th class="p-2">Tipo</th>
+              <th class="p-2">Producto</th>
+              <th class="p-2">Destino / Origen</th>
+              <th class="p-2">Detalle / Total</th>
+            </tr>
+          </thead>
+          <tbody id="tabla-movimientos-admin"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANTALLA 3: VISTA DEL ESTIBADOR -->
+  <div id="pantalla-estibador" class="hidden max-w-md mx-auto p-4 pb-12">
+    <!-- CABECERA DEL ESTIBADOR -->
+    <div class="bg-blue-700 text-white p-4 rounded-2xl shadow-lg mb-4">
+      <div class="flex justify-between items-start gap-2">
+        <div>
+          <p id="estado-cabecera-turno" class="text-xs font-bold uppercase tracking-wider text-amber-300">Estado del Turno:</p>
+          <h1 id="nombre-estibador-activo" class="text-xl font-bold"></h1>
+          <p id="hora-inicio-turno-estibador" class="text-xs opacity-90 mt-0.5"></p>
+        </div>
+        <button onclick="salirManteniendoTurno()" class="bg-blue-800 hover:bg-blue-900 text-white border border-blue-500 font-bold px-3 py-1.5 rounded-xl text-xs shadow" title="Salir a la pantalla principal sin cerrar tu turno">
+          ⏸️ Salir (Mantener Turno)
+        </button>
+      </div>
+
+      <!-- BOTONES DE CONTROL DE TURNO EN CABECERA -->
+      <div id="controles-cabecera-turno" class="mt-3 pt-3 border-t border-blue-600 flex gap-2"></div>
+    </div>
+
+    <!-- PANEL DE CONTROL DE TURNO (ABRIR O CONTINUAR TURNO) -->
+    <div id="panel-gestion-turno-estibador" class="hidden bg-white p-5 rounded-2xl shadow-lg mb-4 border-2 border-blue-500 text-center"></div>
+
+    <!-- BANNER ALERTA ESTIBADOR -->
+    <div id="banner-alertas-estibador" class="hidden mb-4 p-3 rounded-xl border-l-4 border-red-600 bg-red-50 text-red-800 text-xs shadow-sm"></div>
+
+    <!-- ZONA DE OPERACIONES DEL TURNO (SOLO ACTIVA CUANDO EL TURNO ESTÁ ABIERTO Y EN CURSO) -->
+    <div id="zona-operaciones-estibador">
+      <!-- AGREGAR ENTRADA / PRODUCTO MANUAL (ESTIBADOR) -->
+      <div class="bg-white p-4 rounded-2xl shadow mb-4 border-t-4 border-green-500">
+        <h2 class="font-bold text-sm mb-2 text-green-800">➕ Registrar Entrada / Nuevo Producto</h2>
+        <div class="flex flex-col gap-2">
+          <input type="text" id="manual-estibador-nombre" list="lista-nombres-productos" placeholder="Nombre del producto..." class="border p-2.5 rounded-xl text-sm w-full">
+          <div class="flex gap-2">
+            <input type="number" id="manual-estibador-cant" placeholder="Cant. a ingresar" min="1" class="border p-2.5 rounded-xl text-sm flex-1">
+            <button onclick="agregarManual('estibador')" class="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2.5 rounded-xl text-sm shadow">
+              + Sumar Entrada
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- BUSCADOR Y LISTA PARA DAR SALIDA -->
+      <div class="bg-white p-4 rounded-2xl shadow mb-4">
+        <label class="block text-sm font-bold mb-2">🔍 Buscar Producto para Dar Salida:</label>
+        <input type="text" id="buscador-estibador" oninput="renderizarVistaEstibador()" placeholder="Escribe nombre o ID..." class="w-full p-3 border-2 border-blue-200 rounded-xl mb-4 text-lg">
+        
+        <div id="lista-productos-estibador" class="space-y-3"></div>
+      </div>
+    </div>
+
+    <!-- HISTORIAL DE MOVIMIENTOS POR FECHA (ESTIBADOR) -->
+    <div class="bg-white p-4 rounded-2xl shadow border-t-4 border-blue-600">
+      <h2 class="font-bold text-base mb-1 text-blue-900">📋 Historial de Movimientos</h2>
+      <p class="text-xs text-slate-500 mb-3">Selecciona una fecha o rango de días para consultar entradas y salidas:</p>
+
+      <div class="bg-slate-50 p-3 rounded-xl border mb-3 space-y-2">
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <label class="block font-bold text-slate-600 mb-1">📅 Desde el día:</label>
+            <input type="date" id="fecha-desde-estibador" onchange="renderizarHistorialEstibador()" class="border p-2 rounded-lg w-full bg-white font-semibold">
+          </div>
+          <div>
+            <label class="block font-bold text-slate-600 mb-1">📅 Hasta el día:</label>
+            <input type="date" id="fecha-hasta-estibador" onchange="renderizarHistorialEstibador()" class="border p-2 rounded-lg w-full bg-white font-semibold">
+          </div>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button onclick="filtrarHoy('estibador')" class="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold py-2 rounded-lg text-xs">
+            📅 Ver Hoy
+          </button>
+          <button onclick="limpiarFiltroFechas('estibador')" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 rounded-lg text-xs">
+            🔄 Ver Todos
+          </button>
+        </div>
+        <button id="btn-agrupar-estibador" onclick="alternarAgrupacionHistorial('estibador')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg text-xs shadow">
+          📦 Vista: Agrupado por Producto (Cambiar a Detallado)
+        </button>
+      </div>
+
+      <p id="contador-movs-estibador" class="text-xs font-bold text-slate-500 mb-2"></p>
+      <div id="lista-historial-estibador" class="space-y-2 max-h-96 overflow-y-auto pr-1"></div>
+    </div>
+  </div>
+
+  <!-- LISTA AUTOCOMPLETADO DE PRODUCTOS -->
+  <datalist id="lista-nombres-productos"></datalist>
+
+  <!-- MODAL DE CIERRE DE TURNO (CON AGRUPACIÓN DE PRODUCTOS) -->
+  <div id="modal-turno" class="hidden fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+    <div class="bg-white p-6 rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl">
+      <h2 class="text-xl font-bold text-center mb-1">📊 Resumen y Cierre de Turno</h2>
+      <p id="info-turno-cierre" class="text-center text-xs text-slate-500 mb-3"></p>
+
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="font-bold text-xs sm:text-sm text-slate-700">Movimientos del turno agrupados por producto:</h3>
+        <button id="btn-toggle-modal-turno" onclick="alternarVistaModalTurno()" class="text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-bold px-2.5 py-1 rounded-lg">
+          🕒 Ver cronológico
+        </button>
+      </div>
+      
+      <div class="overflow-y-auto flex-1 border rounded-xl p-3 mb-4 bg-slate-50">
+        <div id="lista-movimientos-turno" class="space-y-2.5 text-sm"></div>
+      </div>
+
+      <div class="flex gap-3">
+        <button onclick="continuarTurnoDesdeModal()" class="flex-1 bg-slate-200 hover:bg-slate-300 py-3 rounded-xl font-bold text-sm">
+          ▶️ Seguir en el Turno
+        </button>
+        <button onclick="confirmarCierreTurno()" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold text-sm shadow">
+          🛑 Confirmar y Cerrar Turno
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const LIMITE_STOCK_BAJO = 5;
+    const CLAVE_SESION_LOCAL = 'almacen_sesion_activa_uid';
+
+    // CONFIGURACIÓN DE TU BASE DE DATOS EN LA NUBE (FIREBASE)
+    const firebaseConfig = {
+      databaseURL: "https://almacen-inventario-20028-default-rtdb.firebaseio.com/"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // VARIABLES EN MEMORIA
+    let usuarios = [];
+    let productos = [];
+    let movimientos = [];
+    let usuarioActivo = null;
+    let inicioTurno = null;
+    let esperandoConfirmacionContinuar = false;
+
+    // ESTADOS DE AGRUPACIÓN POR PRODUCTO (ACTIVO POR DEFECTO)
+    let agruparHistorialAdmin = true;
+    let agruparHistorialEstibador = true;
+    let agruparModalTurno = true;
+
+    // ESCUCHAR CAMBIOS EN LA NUBE EN TIEMPO REAL
+    db.ref('almacen').on('value', (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        usuarios = data.usuarios ? Object.values(data.usuarios) : [];
+        productos = data.productos ? Object.values(data.productos) : [];
+        movimientos = data.movimientos ? Object.values(data.movimientos) : [];
+      } else {
+        usuarios = [
+          { id: 1, nombre: 'Administrador', pin: '1234', rol: 'admin', turnoAbierto: false, inicioTurnoMs: null },
+          { id: 2, nombre: 'Juan (Estibador)', pin: '1111', rol: 'estibador', turnoAbierto: false, inicioTurnoMs: null }
+        ];
+        productos = [
+          { id: 'PROD-1001', nombre: 'Saco de Cemento 50kg', cantidad: 120 },
+          { id: 'PROD-1002', nombre: 'Caja de Clavos 2 pulgadas', cantidad: 4 }
+        ];
+        movimientos = [];
+        guardarDatos();
+      }
+
+      document.getElementById('estado-nube').innerHTML = '🟢 Nube Sincronizada';
+      document.getElementById('estado-nube').className = 'font-bold text-green-400';
+
+      cargarLogin();
+
+      // Si había una sesión guardada en el navegador (ej. recargó la página sin cerrar turno), restaurarla
+      if (!usuarioActivo) {
+        const uidGuardado = localStorage.getItem(CLAVE_SESION_LOCAL);
+        if (uidGuardado) {
+          const userRestaurado = usuarios.find(u => String(u.id) === String(uidGuardado));
+          if (userRestaurado && (userRestaurado.rol === 'admin' || userRestaurado.turnoAbierto)) {
+            usuarioActivo = userRestaurado;
+            inicioTurno = userRestaurado.inicioTurnoMs ? new Date(userRestaurado.inicioTurnoMs) : new Date();
+            document.getElementById('pantalla-login').classList.add('hidden');
+            if (usuarioActivo.rol === 'admin') {
+              document.getElementById('pantalla-admin').classList.remove('hidden');
+            } else {
+              document.getElementById('pantalla-estibador').classList.remove('hidden');
+            }
+          } else {
+            localStorage.removeItem(CLAVE_SESION_LOCAL);
+          }
+        }
+      } else {
+        // Sincronizar datos actualizados del usuario activo desde Firebase
+        const actualizado = usuarios.find(u => u.id === usuarioActivo.id);
+        if (actualizado) {
+          usuarioActivo = actualizado;
+          inicioTurno = actualizado.inicioTurnoMs ? new Date(actualizado.inicioTurnoMs) : inicioTurno;
+        }
+      }
+
+      if (usuarioActivo) {
+        if (usuarioActivo.rol === 'admin') renderizarAdmin();
+        else renderizarVistaEstibador();
+      }
+    }, (error) => {
+      console.error(error);
+      document.getElementById('estado-nube').innerHTML = '🔴 Error de permisos en Firebase (Revisa Reglas)';
+      document.getElementById('estado-nube').className = 'font-bold text-red-400';
+    });
+
+    function guardarDatos() {
+      document.getElementById('estado-nube').innerHTML = '🔄 Guardando...';
+      db.ref('almacen').set({
+        usuarios: usuarios,
+        productos: productos,
+        movimientos: movimientos
+      }).then(() => {
+        document.getElementById('estado-nube').innerHTML = '🟢 Nube Sincronizada';
+      });
+      actualizarAutocompletado();
+    }
+
+    function actualizarAutocompletado() {
+      const datalist = document.getElementById('lista-nombres-productos');
+      datalist.innerHTML = productos.map(p => `<option value="${p.nombre}">ID: ${p.id} (Stock: ${p.cantidad})</option>`).join('');
+    }
+
+    // EXTRAER CANTIDAD NUMÉRICA DE UN MOVIMIENTO
+    function obtenerCantidadMovimiento(m) {
+      if (m.cantidad !== undefined && !isNaN(Number(m.cantidad))) {
+        return Math.abs(Number(m.cantidad));
+      }
+      if (m.detalle) {
+        const match = String(m.detalle).match(/[+-]?\d+/);
+        if (match) return Math.abs(parseInt(match[0], 10));
+      }
+      return 0;
+    }
+
+    // AGRUPAR MOVIMIENTOS DEL MISMO PRODUCTO
+    function agruparMovimientosPorProducto(listaMovs) {
+      const mapa = new Map();
+
+      listaMovs.forEach(m => {
+        const clave = `${(m.idProducto || '').toLowerCase()}|${(m.producto || '').toLowerCase()}`;
+        const cant = obtenerCantidadMovimiento(m);
+        const esEntrada = m.tipo === 'ENTRADA';
+        const destinoNombre = m.destino || (esEntrada ? 'Ingreso' : 'Salida');
+
+        if (!mapa.has(clave)) {
+          const prodEnCatalogo = productos.find(p =>
+            String(p.id).toLowerCase() === String(m.idProducto || '').toLowerCase() ||
+            String(p.nombre).toLowerCase() === String(m.producto || '').toLowerCase()
+          );
+
+          mapa.set(clave, {
+            idProducto: m.idProducto || '-',
+            producto: m.producto || 'Producto',
+            totalEntradas: 0,
+            totalSalidas: 0,
+            conteoEntradas: 0,
+            conteoSalidas: 0,
+            totalOperaciones: 0,
+            ultimaFecha: m.fecha || '',
+            ultimoTimestamp: m.timestamp || 0,
+            usuarios: new Set(),
+            desgloseDestinos: {},
+            historialParcial: [],
+            stockActual: prodEnCatalogo ? prodEnCatalogo.cantidad : null
+          });
+        }
+
+        const grupo = mapa.get(clave);
+        grupo.totalOperaciones += 1;
+        if (m.usuario) grupo.usuarios.add(m.usuario);
+
+        if ((m.timestamp || 0) >= grupo.ultimoTimestamp) {
+          grupo.ultimoTimestamp = m.timestamp || 0;
+          grupo.ultimaFecha = m.fecha || grupo.ultimaFecha;
+        }
+
+        if (esEntrada) {
+          grupo.totalEntradas += cant;
+          grupo.conteoEntradas += 1;
+          grupo.historialParcial.push(`+${cant}`);
+        } else {
+          grupo.totalSalidas += cant;
+          grupo.conteoSalidas += 1;
+          grupo.historialParcial.push(`-${cant}`);
+        }
+
+        const claveDestino = `${m.tipo}|${destinoNombre}`;
+        if (!grupo.desgloseDestinos[claveDestino]) {
+          grupo.desgloseDestinos[claveDestino] = {
+            tipo: m.tipo,
+            destino: destinoNombre,
+            cantidadTotal: 0,
+            operaciones: 0,
+            parciales: []
+          };
+        }
+        grupo.desgloseDestinos[claveDestino].cantidadTotal += cant;
+        grupo.desgloseDestinos[claveDestino].operaciones += 1;
+        grupo.desgloseDestinos[claveDestino].parciales.push(esEntrada ? `+${cant}` : `-${cant}`);
+      });
+
+      return Array.from(mapa.values()).sort((a, b) => b.ultimoTimestamp - a.ultimoTimestamp);
+    }
+
+    function alternarAgrupacionHistorial(perfil) {
+      if (perfil === 'admin') {
+        agruparHistorialAdmin = !agruparHistorialAdmin;
+        const btn = document.getElementById('btn-agrupar-admin');
+        btn.innerText = agruparHistorialAdmin ? '📦 Agrupado por Producto' : '🕒 Vista Detallada';
+        btn.className = agruparHistorialAdmin
+          ? 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-2 rounded-lg shadow'
+          : 'bg-slate-700 hover:bg-slate-800 text-white font-bold px-3 py-2 rounded-lg shadow';
+        renderizarAdmin();
+      } else {
+        agruparHistorialEstibador = !agruparHistorialEstibador;
+        const btn = document.getElementById('btn-agrupar-estibador');
+        btn.innerText = agruparHistorialEstibador
+          ? '📦 Vista: Agrupado por Producto (Cambiar a Detallado)'
+          : '🕒 Vista: Detallado uno por uno (Cambiar a Agrupado)';
+        btn.className = agruparHistorialEstibador
+          ? 'w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg text-xs shadow'
+          : 'w-full bg-slate-700 hover:bg-slate-800 text-white font-bold py-2 rounded-lg text-xs shadow';
+        renderizarHistorialEstibador();
+      }
+    }
+
+    // UTILIDADES PARA FILTRADO POR FECHAS
+    function obtenerFechaLocalISO(dateObj = new Date()) {
+      const anio = dateObj.getFullYear();
+      const mes = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const dia = String(dateObj.getDate()).padStart(2, '0');
+      return `${anio}-${mes}-${dia}`;
+    }
+
+    function filtrarMovimientosPorFecha(prefijo) {
+      const desdeVal = document.getElementById(`fecha-desde-${prefijo}`)?.value;
+      const hastaVal = document.getElementById(`fecha-hasta-${prefijo}`)?.value;
+
+      let inicioMs = null;
+      let finMs = null;
+
+      if (desdeVal) {
+        const [y, m, d] = desdeVal.split('-').map(Number);
+        inicioMs = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+      }
+      if (hastaVal) {
+        const [y, m, d] = hastaVal.split('-').map(Number);
+        finMs = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+      }
+
+      return movimientos.filter(m => {
+        let ts = m.timestamp;
+        if (!ts && m.fecha) {
+          const parsed = Date.parse(m.fecha);
+          if (!isNaN(parsed)) ts = parsed;
+        }
+        if (!ts) return true;
+
+        if (inicioMs !== null && ts < inicioMs) return false;
+        if (finMs !== null && ts > finMs) return false;
+        return true;
+      });
+    }
+
+    function filtrarHoy(prefijo) {
+      const hoy = obtenerFechaLocalISO();
+      document.getElementById(`fecha-desde-${prefijo}`).value = hoy;
+      document.getElementById(`fecha-hasta-${prefijo}`).value = hoy;
+      if (prefijo === 'admin') renderizarAdmin();
+      else renderizarHistorialEstibador();
+    }
+
+    function limpiarFiltroFechas(prefijo) {
+      document.getElementById(`fecha-desde-${prefijo}`).value = '';
+      document.getElementById(`fecha-hasta-${prefijo}`).value = '';
+      if (prefijo === 'admin') renderizarAdmin();
+      else renderizarHistorialEstibador();
+    }
+
+    // LOGIN Y GESTIÓN DE SESIÓN / TURNOS
+    function cargarLogin() {
+      const select = document.getElementById('login-usuario');
+      const valorActual = select.value;
+      select.innerHTML = usuarios.map(u => {
+        const estadoTurno = (u.rol === 'estibador' && u.turnoAbierto) ? ' 🟢 [TURNO ABIERTO]' : '';
+        return `<option value="${u.id}">${u.nombre} (${u.rol.toUpperCase()})${estadoTurno}</option>`;
+      }).join('');
+      if (valorActual) select.value = valorActual;
+      actualizarAutocompletado();
+    }
+
+    function iniciarSesion() {
+      if (usuarios.length === 0) return alert('⏳ Esperando conexión con la nube, intenta en 2 segundos...');
+      const idUsuario = parseInt(document.getElementById('login-usuario').value);
+      const pin = document.getElementById('login-pin').value;
+      const user = usuarios.find(u => u.id === idUsuario && String(u.pin) === String(pin));
+
+      if (!user) return alert('❌ PIN / Contraseña incorrecta.');
+
+      usuarioActivo = user;
+      document.getElementById('login-pin').value = '';
+      document.getElementById('pantalla-login').classList.add('hidden');
+
+      if (user.rol === 'admin') {
+        if (!user.inicioTurnoMs) {
+          user.inicioTurnoMs = Date.now();
+          user.turnoAbierto = true;
+          guardarDatos();
+        }
+        inicioTurno = new Date(user.inicioTurnoMs);
+        localStorage.setItem(CLAVE_SESION_LOCAL, String(user.id));
+        document.getElementById('subtitulo-admin').innerText = `Sesión iniciada como: ${user.nombre} (Inicio: ${inicioTurno.toLocaleTimeString()})`;
+        document.getElementById('pantalla-admin').classList.remove('hidden');
+        renderizarAdmin();
+      } else {
+        // Estibador: si ya tenía turno abierto, mostrar opción de "Continuar con Turno" o "Cerrar Turno"
+        if (user.turnoAbierto && user.inicioTurnoMs) {
+          inicioTurno = new Date(user.inicioTurnoMs);
+          esperandoConfirmacionContinuar = true;
+          localStorage.setItem(CLAVE_SESION_LOCAL, String(user.id));
+        } else {
+          inicioTurno = null;
+          esperandoConfirmacionContinuar = false;
+        }
+        document.getElementById('pantalla-estibador').classList.remove('hidden');
+        renderizarVistaEstibador();
+      }
+    }
+
+    // ABRIR NUEVO TURNO (ESTIBADOR)
+    function abrirTurnoEstibador() {
+      if (!usuarioActivo) return;
+      const ahora = new Date();
+      usuarioActivo.turnoAbierto = true;
+      usuarioActivo.inicioTurnoMs = ahora.getTime();
+      usuarioActivo.inicioTurnoTexto = ahora.toLocaleString();
+      inicioTurno = ahora;
+      esperandoConfirmacionContinuar = false;
+
+      localStorage.setItem(CLAVE_SESION_LOCAL, String(usuarioActivo.id));
+      guardarDatos();
+      renderizarVistaEstibador();
+    }
+
+    // CONTINUAR CON EL TURNO ABIERTO (ESTIBADOR)
+    function continuarTurnoEstibador() {
+      if (!usuarioActivo) return;
+      esperandoConfirmacionContinuar = false;
+      inicioTurno = usuarioActivo.inicioTurnoMs ? new Date(usuarioActivo.inicioTurnoMs) : new Date();
+      localStorage.setItem(CLAVE_SESION_LOCAL, String(usuarioActivo.id));
+      renderizarVistaEstibador();
+    }
+
+    // SALIR TEMPORALMENTE SIN CERRAR EL TURNO (EL TURNO SIGUE ABIERTO EN LA NUBE)
+    function salirManteniendoTurno() {
+      usuarioActivo = null;
+      esperandoConfirmacionContinuar = false;
+      localStorage.removeItem(CLAVE_SESION_LOCAL);
+      document.getElementById('pantalla-admin').classList.add('hidden');
+      document.getElementById('pantalla-estibador').classList.add('hidden');
+      document.getElementById('modal-turno').classList.add('hidden');
+      document.getElementById('pantalla-login').classList.remove('hidden');
+      cargarLogin();
+    }
+
+    // CERRAR SESIÓN DEFINITIVA (TRAS CERRAR TURNO O SALIR ADMIN)
+    function salirPantallaLogin() {
+      if (usuarioActivo && usuarioActivo.rol === 'admin') {
+        usuarioActivo.turnoAbierto = false;
+        usuarioActivo.inicioTurnoMs = null;
+        guardarDatos();
+      }
+      usuarioActivo = null;
+      inicioTurno = null;
+      esperandoConfirmacionContinuar = false;
+      localStorage.removeItem(CLAVE_SESION_LOCAL);
+      document.getElementById('pantalla-admin').classList.add('hidden');
+      document.getElementById('pantalla-estibador').classList.add('hidden');
+      document.getElementById('modal-turno').classList.add('hidden');
+      document.getElementById('pantalla-login').classList.remove('hidden');
+      cargarLogin();
+    }
+
+    // ALARMAS VISUALES
+    function obtenerEstadoAlarma(cantidad) {
+      if (cantidad <= 0) {
+        return {
+          badge: `<span class="bg-red-600 text-white px-2.5 py-1 rounded-full text-xs font-black animate-pulse">🚨 AGOTADO (0)</span>`,
+          filaClase: 'bg-red-50 border-red-200',
+          textoColor: 'text-red-600'
+        };
+      } else if (cantidad <= LIMITE_STOCK_BAJO) {
+        return {
+          badge: `<span class="bg-amber-400 text-slate-900 px-2.5 py-1 rounded-full text-xs font-bold">⚠️ POR AGOTARSE (Quedan ${cantidad})</span>`,
+          filaClase: 'bg-amber-50 border-amber-200',
+          textoColor: 'text-amber-600'
+        };
+      }
+      return {
+        badge: `<span class="bg-green-100 text-green-800 px-2.5 py-1 rounded-full text-xs font-bold">✅ OK (${cantidad} uds)</span>`,
+        filaClase: 'hover:bg-slate-50',
+        textoColor: 'text-green-600'
+      };
+    }
+
+    function actualizarBannersAlerta() {
+      const agotados = productos.filter(p => p.cantidad <= 0);
+      const bajos = productos.filter(p => p.cantidad > 0 && p.cantidad <= LIMITE_STOCK_BAJO);
+      const bannerAdmin = document.getElementById('banner-alertas-admin');
+      const bannerEstibador = document.getElementById('banner-alertas-estibador');
+
+      if (agotados.length === 0 && bajos.length === 0) {
+        bannerAdmin.classList.add('hidden');
+        bannerEstibador.classList.add('hidden');
+        return;
+      }
+
+      let html = `<div class="font-bold text-sm mb-1">🔔 ALARMA DE INVENTARIO:</div>`;
+      if (agotados.length > 0) {
+        html += `<div>🚨 <b>Agotados (0 uds):</b> ${agotados.map(p => p.nombre).join(', ')}</div>`;
+      }
+      if (bajos.length > 0) {
+        html += `<div>⚠️ <b>Próximos a agotarse:</b> ${bajos.map(p => `${p.nombre} (${p.cantidad})`).join(', ')}</div>`;
+      }
+
+      bannerAdmin.innerHTML = html;
+      bannerAdmin.classList.remove('hidden');
+      bannerEstibador.innerHTML = html;
+      bannerEstibador.classList.remove('hidden');
+    }
+
+    function formatearBadgeDestino(destino, extraTexto = '') {
+      if (destino === 'Área de Venta') {
+        return `<span class="inline-block bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-bold mr-1 mb-1">🏪 Área de Venta ${extraTexto}</span>`;
+      } else if (destino === 'Fuera de la Tienda') {
+        return `<span class="inline-block bg-orange-100 text-orange-800 px-2 py-0.5 rounded text-xs font-bold mr-1 mb-1">🚚 Fuera de Tienda ${extraTexto}</span>`;
+      } else if (destino) {
+        return `<span class="inline-block bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-xs font-semibold mr-1 mb-1">📍 ${destino} ${extraTexto}</span>`;
+      }
+      return `<span class="text-slate-400 text-xs">-</span>`;
+    }
+
+    // FUNCIONES DEL ADMINISTRADOR
+    function renderizarAdmin() {
+      actualizarBannersAlerta();
+
+      // 1. Renderizar Usuarios y Estado de su Turno
+      document.getElementById('lista-usuarios').innerHTML = usuarios.map(u => {
+        const badgeTurno = (u.rol === 'estibador' && u.turnoAbierto)
+          ? `<span class="bg-green-100 text-green-800 px-2 py-0.5 rounded text-[10px] font-black">🟢 TURNO ABIERTO</span>`
+          : `<span class="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold">⚪ SIN TURNO</span>`;
+
+        return `
+        <div class="flex flex-col gap-1 bg-slate-50 p-2 rounded-lg border text-xs">
+          <div class="flex flex-wrap sm:flex-nowrap items-center gap-1.5">
+            <input type="text" id="edit-user-nombre-${u.id}" value="${u.nombre}" class="border p-1.5 rounded flex-1 font-bold" title="Nombre">
+            <input type="text" id="edit-user-pin-${u.id}" value="${u.pin}" class="border p-1.5 rounded w-16 text-center font-mono" title="PIN / Contraseña">
+            <select id="edit-user-rol-${u.id}" class="border p-1.5 rounded bg-white">
+              <option value="estibador" ${u.rol === 'estibador' ? 'selected' : ''}>Estibador</option>
+              <option value="admin" ${u.rol === 'admin' ? 'selected' : ''}>Admin</option>
+            </select>
+            <button onclick="guardarEdicionUsuario(${u.id})" class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded font-bold" title="Guardar cambios">💾</button>
+            <button onclick="eliminarUsuario(${u.id})" class="bg-red-100 hover:bg-red-200 text-red-600 px-2.5 py-1.5 rounded font-bold" title="Eliminar usuario">🗑️</button>
+          </div>
+          ${u.rol === 'estibador' ? `<div class="flex justify-between items-center text-[11px] text-slate-500 px-1"><span>Estado: ${badgeTurno}</span>${u.turnoAbierto && u.inicioTurnoTexto ? `<span>Desde: ${u.inicioTurnoTexto}</span>` : ''}</div>` : ''}
+        </div>
+      `}).join('');
+
+      // 2. Renderizar Inventario
+      const filtro = (document.getElementById('buscador-admin')?.value || '').toLowerCase();
+      const prodFiltrados = productos.filter(p => 
+        p.nombre.toLowerCase().includes(filtro) || p.id.toLowerCase().includes(filtro)
+      );
+
+      if (prodFiltrados.length === 0) {
+        document.getElementById('tabla-inventario-admin').innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">No hay productos registrados todavía. Agrega uno manualmente o sube un archivo Excel.</td></tr>`;
+      } else {
+        document.getElementById('tabla-inventario-admin').innerHTML = prodFiltrados.map(p => {
+          const alarma = obtenerEstadoAlarma(p.cantidad);
+          return `
+          <tr class="border-b ${alarma.filaClase}">
+            <td class="p-3 font-mono text-xs font-bold text-blue-700">${p.id}</td>
+            <td class="p-3 font-bold">${p.nombre}</td>
+            <td class="p-3">${alarma.badge}</td>
+            <td class="p-3">
+              <div class="flex items-center gap-2">
+                <input type="number" id="edit-cant-${p.id}" value="${p.cantidad}" min="0" class="border-2 border-slate-300 p-1.5 rounded-lg w-24 text-center font-bold">
+                <button onclick="modificarCantidadAdmin('${p.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow">
+                  💾 Guardar
+                </button>
+              </div>
+            </td>
+            <td class="p-3 text-right">
+              <button onclick="eliminarProductoRaiz('${p.id}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow">
+                🗑️ Eliminar
+              </button>
+            </td>
+          </tr>
+        `}).join('');
+      }
+
+      // 3. Renderizar Movimientos (Agrupados por Producto o Detallados)
+      const movsFiltrados = filtrarMovimientosPorFecha('admin').slice().reverse();
+
+      if (movsFiltrados.length === 0) {
+        document.getElementById('contador-movs-admin').innerText = `Mostrando 0 movimientos en las fechas seleccionadas`;
+        document.getElementById('tabla-movimientos-admin').innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400">No hay movimientos registrados en las fechas seleccionadas.</td></tr>`;
+      } else if (agruparHistorialAdmin) {
+        const grupos = agruparMovimientosPorProducto(movsFiltrados);
+        document.getElementById('contador-movs-admin').innerText = `Mostrando ${grupos.length} producto(s) consolidados (de ${movsFiltrados.length} movimientos registrados)`;
+
+        document.getElementById('tabla-movimientos-admin').innerHTML = grupos.map(g => {
+          let badgeTipo = '';
+          if (g.totalEntradas > 0 && g.totalSalidas > 0) {
+            badgeTipo = `<span class="px-2 py-1 rounded text-xs font-bold bg-indigo-100 text-indigo-800">ENTRADA / SALIDA</span>`;
+          } else if (g.totalEntradas > 0) {
+            badgeTipo = `<span class="px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-700">ENTRADA (${g.conteoEntradas})</span>`;
+          } else {
+            badgeTipo = `<span class="px-2 py-1 rounded text-xs font-bold bg-red-100 text-red-700">SALIDA (${g.conteoSalidas})</span>`;
+          }
+
+          const destinosHTML = Object.values(g.desgloseDestinos).map(d => {
+            const signo = d.tipo === 'ENTRADA' ? '+' : '-';
+            return formatearBadgeDestino(d.destino, `(${signo}${d.cantidadTotal} en ${d.operaciones} mov.)`);
+          }).join(' ');
+
+          let resumenTotalHTML = '';
+          if (g.totalEntradas > 0) {
+            resumenTotalHTML += `<span class="inline-block bg-green-600 text-white px-2.5 py-1 rounded-lg text-xs font-black mr-1">+${g.totalEntradas} uds</span>`;
+          }
+          if (g.totalSalidas > 0) {
+            resumenTotalHTML += `<span class="inline-block bg-red-600 text-white px-2.5 py-1 rounded-lg text-xs font-black mr-1">-${g.totalSalidas} uds</span>`;
+          }
+
+          return `
+          <tr class="border-b hover:bg-slate-50">
+            <td class="p-2 text-slate-500 text-xs">
+              <div>Último: ${g.ultimaFecha}</div>
+              <span class="text-[11px] font-bold text-indigo-600">${g.totalOperaciones} mov(s) agrupados</span>
+            </td>
+            <td class="p-2 font-bold text-xs">${Array.from(g.usuarios).join(', ')}</td>
+            <td class="p-2">${badgeTipo}</td>
+            <td class="p-2 font-bold">
+              ${g.producto} <span class="text-xs font-normal text-slate-400">(${g.idProducto})</span>
+            </td>
+            <td class="p-2">${destinosHTML}</td>
+            <td class="p-2">
+              <div class="flex flex-wrap items-center gap-1">${resumenTotalHTML}</div>
+              <div class="text-[11px] text-slate-500 mt-1">Parciales: ${g.historialParcial.join(', ')}</div>
+            </td>
+          </tr>
+        `}).join('');
+      } else {
+        document.getElementById('contador-movs-admin').innerText = `Mostrando ${movsFiltrados.length} movimiento(s) individuales`;
+        document.getElementById('tabla-movimientos-admin').innerHTML = movsFiltrados.map(m => {
+          const badgeDestino = formatearBadgeDestino(m.destino);
+          return `
+          <tr class="border-b">
+            <td class="p-2 text-slate-500 text-xs">${m.fecha}</td>
+            <td class="p-2 font-bold">${m.usuario}</td>
+            <td class="p-2"><span class="px-2 py-1 rounded text-xs font-bold ${m.tipo === 'ENTRADA' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${m.tipo}</span></td>
+            <td class="p-2">${m.producto} <span class="text-xs text-slate-400">(${m.idProducto})</span></td>
+            <td class="p-2">${badgeDestino}</td>
+            <td class="p-2 font-bold">${m.detalle}</td>
+          </tr>
+        `}).join('');
+      }
+    }
+
+    // GESTIÓN DE USUARIOS
+    function crearUsuario() {
+      const nombre = document.getElementById('nuevo-nombre').value.trim();
+      const pin = document.getElementById('nuevo-pin').value.trim();
+      const rol = document.getElementById('nuevo-rol').value;
+      if (!nombre || !pin) return alert('Completa el nombre y el PIN');
+      
+      usuarios.push({ id: Date.now(), nombre, pin, rol, turnoAbierto: false, inicioTurnoMs: null });
+      guardarDatos();
+      document.getElementById('nuevo-nombre').value = '';
+      document.getElementById('nuevo-pin').value = '';
+      alert('✅ Usuario creado en la nube');
+    }
+
+    function guardarEdicionUsuario(id) {
+      const u = usuarios.find(user => user.id === id);
+      if (!u) return;
+      const nuevoNombre = document.getElementById(`edit-user-nombre-${id}`).value.trim();
+      const nuevoPin = document.getElementById(`edit-user-pin-${id}`).value.trim();
+      const nuevoRol = document.getElementById(`edit-user-rol-${id}`).value;
+
+      if (!nuevoNombre || !nuevoPin) return alert('El nombre y el PIN no pueden estar vacíos.');
+
+      u.nombre = nuevoNombre;
+      u.pin = nuevoPin;
+      u.rol = nuevoRol;
+      guardarDatos();
+      alert('✅ Parámetros del usuario actualizados.');
+    }
+
+    function eliminarUsuario(id) {
+      if (usuarios.length <= 1) return alert('No puedes eliminar al único usuario del sistema.');
+      if (id === usuarioActivo.id) return alert('No puedes eliminar tu propio usuario mientras estás conectado.');
+      if (!confirm('¿Seguro que deseas eliminar este usuario?')) return;
+
+      usuarios = usuarios.filter(u => u.id !== id);
+      guardarDatos();
+    }
+
+    // MODIFICAR Y ELIMINAR PRODUCTOS (ADMIN)
+    function modificarCantidadAdmin(idProd) {
+      const prod = productos.find(p => p.id === idProd);
+      const nuevaCant = parseInt(document.getElementById(`edit-cant-${idProd}`).value);
+
+      if (isNaN(nuevaCant) || nuevaCant < 0) return alert('Ingresa una cantidad válida (0 o mayor).');
+      
+      const cantAnterior = prod.cantidad;
+      const diferencia = nuevaCant - cantAnterior;
+      if (diferencia === 0) return alert('La cantidad es la misma.');
+
+      prod.cantidad = nuevaCant;
+      const tipoMov = diferencia > 0 ? 'ENTRADA' : 'SALIDA';
+      registrarMovimiento(tipoMov, prod, Math.abs(diferencia), `Ajuste Admin (${cantAnterior} ➡️ ${nuevaCant})`, 'Ajuste Inventario');
+      
+      guardarDatos();
+      alert(`✅ Cantidad de "${prod.nombre}" actualizada a ${nuevaCant}.`);
+    }
+
+    function eliminarProductoRaiz(idProd) {
+      const prod = productos.find(p => p.id === idProd);
+      if (!confirm(`⚠️ ¿Estás 100% seguro de eliminar "${prod.nombre}" (${prod.id}) de raíz del inventario?`)) return;
+
+      productos = productos.filter(p => p.id !== idProd);
+      registrarMovimiento('SALIDA', prod, prod.cantidad, `Eliminado de raíz (${prod.cantidad} ➡️ 0)`, 'Baja de Catálogo');
+      guardarDatos();
+    }
+
+    // BORRAR TODO EL INVENTARIO (EXCLUSIVO PARA ADMINISTRADOR)
+    function eliminarTodoInventario() {
+      if (!usuarioActivo || usuarioActivo.rol !== 'admin') {
+        return alert('⛔ Acción denegada: Solo el Administrador tiene permisos para borrar todo el inventario.');
+      }
+      if (!productos || productos.length === 0) {
+        return alert('⚠️ El inventario ya se encuentra vacío.');
+      }
+
+      const totalProductos = productos.length;
+      const totalUnidades = productos.reduce((acc, p) => acc + (Number(p.cantidad) || 0), 0);
+
+      const confirmacion1 = confirm(
+        `⚠️ ¡ATENCIÓN ADMINISTRADOR!\n\n` +
+        `Estás a punto de BORRAR TODO EL INVENTARIO:\n` +
+        `• ${totalProductos} productos registrados\n` +
+        `• ${totalUnidades} unidades totales en stock\n\n` +
+        `¿Estás seguro de que deseas continuar?`
+      );
+      if (!confirmacion1) return;
+
+      const confirmacion2 = confirm(
+        `🚨 SEGUNDA Y ÚLTIMA CONFIRMACIÓN:\n\n` +
+        `Se eliminarán de raíz todos los productos del almacén y esta acción NO se puede deshacer.\n\n` +
+        `¿Confirmas el vaciado total del inventario?`
+      );
+      if (!confirmacion2) return;
+
+      productos = [];
+      registrarMovimiento(
+        'SALIDA',
+        { id: 'TODOS', nombre: 'VACIADO TOTAL DEL INVENTARIO' },
+        totalUnidades,
+        `Inventario borrado por Admin (${totalProductos} prods / ${totalUnidades} uds ➡️ 0)`,
+        'Vaciado Admin'
+      );
+
+      guardarDatos();
+      renderizarAdmin();
+      alert('✅ Todo el inventario ha sido eliminado correctamente.');
+    }
+
+    // AGREGAR PRODUCTO MANUALMENTE
+    function agregarManual(origen) {
+      if (origen === 'estibador' && (!usuarioActivo || !usuarioActivo.turnoAbierto)) {
+        return alert('⚠️ Primero debes ABRIR TURNO para poder registrar movimientos.');
+      }
+
+      const inputNombre = document.getElementById(`manual-${origen}-nombre`);
+      const inputCant = document.getElementById(`manual-${origen}-cant`);
+      const nombre = inputNombre.value.trim();
+      const cant = parseInt(inputCant.value);
+
+      if (!nombre || isNaN(cant) || cant <= 0) {
+        return alert('Escribe el nombre del producto y una cantidad válida mayor a 0.');
+      }
+
+      let prodExistente = productos.find(p => 
+        p.nombre.toLowerCase() === nombre.toLowerCase() || p.id.toLowerCase() === nombre.toLowerCase()
+      );
+
+      if (prodExistente) {
+        const ant = prodExistente.cantidad;
+        prodExistente.cantidad += cant;
+        registrarMovimiento('ENTRADA', prodExistente, cant, `+${cant} (${ant} ➡️ ${prodExistente.cantidad})`, 'Ingreso Manual');
+        alert(`✅ Se sumaron +${cant} a "${prodExistente.nombre}". Total ahora: ${prodExistente.cantidad}`);
+      } else {
+        const nuevoId = generarNuevoId();
+        const nuevoProd = { id: nuevoId, nombre: nombre, cantidad: cant };
+        productos.push(nuevoProd);
+        registrarMovimiento('ENTRADA', nuevoProd, cant, `+${cant} Nuevo producto`, 'Ingreso Manual');
+        alert(`✅ Producto nuevo creado: "${nombre}" con ID ${nuevoId} (${cant} uds).`);
+      }
+
+      inputNombre.value = '';
+      inputCant.value = '';
+      guardarDatos();
+    }
+
+    function generarNuevoId() {
+      let max = 1000;
+      productos.forEach(p => {
+        const num = parseInt(String(p.id).replace(/\D/g, ''));
+        if (!isNaN(num) && num > max) max = num;
+      });
+      return 'PROD-' + (max + 1);
+    }
+
+    // EXCEL: DESCARGAR PLANTILLA
+    function descargarPlantilla() {
+      let datosExcel = [];
+      if (productos && productos.length > 0) {
+        datosExcel = productos.map(p => ({
+          ID: p.id,
+          Producto: p.nombre,
+          Cantidad: p.cantidad
+        }));
+      } else {
+        datosExcel = [
+          { ID: "", Producto: "Ejemplo Producto Nuevo (Borra esta fila o edítala)", Cantidad: 10 }
+        ];
+      }
+      const ws = XLSX.utils.json_to_sheet(datosExcel, { header: ["ID", "Producto", "Cantidad"] });
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+      XLSX.writeFile(wb, "Inventario_Almacen.xlsx");
+    }
+
+    // EXCEL: LECTOR INTELIGENTE
+    function procesarExcel() {
+      const input = document.getElementById('archivo-excel');
+      if (!input.files.length) return alert('Primero selecciona un archivo Excel o CSV.');
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, {type: 'array'});
+          const primeraHoja = workbook.SheetNames[0];
+          const matriz = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja], { header: 1, defval: "" });
+
+          const filasValidas = matriz.filter(f => f && f.some(celda => String(celda).trim() !== ""));
+          if (filasValidas.length === 0) return alert('❌ El archivo parece estar vacío.');
+
+          let colId = -1, colProd = -1, colCant = -1;
+          let filaInicio = 0;
+
+          const primeraFila = filasValidas[0].map(c => String(c).toLowerCase().trim());
+          
+          primeraFila.forEach((texto, idx) => {
+            if (['id', 'codigo', 'código', 'sku', 'clave'].includes(texto)) colId = idx;
+            else if (['producto', 'productos', 'nombre', 'descripcion', 'descripción', 'articulo', 'artículo', 'item'].includes(texto)) colProd = idx;
+            else if (['cantidad', 'cant', 'cant.', 'existencia', 'existencias', 'stock', 'unidades', 'total'].includes(texto)) colCant = idx;
+          });
+
+          if (colProd !== -1 || colCant !== -1 || colId !== -1) {
+            filaInicio = 1;
+          }
+
+          if (colProd === -1 || colCant === -1) {
+            if (primeraFila.length >= 3) {
+              colId = 0; colProd = 1; colCant = 2;
+            } else if (primeraFila.length === 2) {
+              colId = -1; colProd = 0; colCant = 1;
+            } else {
+              return alert('❌ Tu archivo debe tener al menos 2 columnas: Producto y Cantidad.');
+            }
+            if (isNaN(parseFloat(filasValidas[0][colCant]))) {
+              filaInicio = 1;
+            }
+          }
+
+          let actualizados = 0, nuevos = 0;
+
+          for (let i = filaInicio; i < filasValidas.length; i++) {
+            const fila = filasValidas[i];
+            const idFila = (colId !== -1 && fila[colId] !== undefined) ? String(fila[colId]).trim() : '';
+            const nombreFila = (colProd !== -1 && fila[colProd] !== undefined) ? String(fila[colProd]).trim() : '';
+            const cantTexto = (colCant !== -1 && fila[colCant] !== undefined) ? String(fila[colCant]).replace(/[^0-9.-]/g, '') : '';
+            const cantFila = parseInt(cantTexto);
+
+            if ((!nombreFila && !idFila) || isNaN(cantFila) || cantFila < 0) continue;
+
+            let prodExistente = null;
+            if (idFila) {
+              prodExistente = productos.find(p => String(p.id).toLowerCase() === idFila.toLowerCase());
+            }
+            if (!prodExistente && nombreFila) {
+              prodExistente = productos.find(p => String(p.nombre).toLowerCase() === nombreFila.toLowerCase());
+            }
+
+            if (prodExistente) {
+              const cantAnterior = prodExistente.cantidad;
+              if (nombreFila) prodExistente.nombre = nombreFila;
+              prodExistente.cantidad = cantFila;
+              actualizados++;
+
+              const dif = cantFila - cantAnterior;
+              if (dif !== 0) {
+                const tipo = dif > 0 ? 'ENTRADA' : 'SALIDA';
+                registrarMovimiento(tipo, prodExistente, Math.abs(dif), `Excel (${cantAnterior} ➡️ ${cantFila})`, 'Carga de Archivo');
+              }
+            } else if (nombreFila) {
+              const nuevoId = idFila || generarNuevoId();
+              const nuevoProd = { id: nuevoId, nombre: nombreFila, cantidad: cantFila };
+              productos.push(nuevoProd);
+              nuevos++;
+              registrarMovimiento('ENTRADA', nuevoProd, cantFila, `+${cantFila} Nuevo`, 'Carga de Archivo');
+            }
+          }
+
+          guardarDatos();
+          renderizarAdmin();
+          input.value = '';
+
+          if (nuevos === 0 && actualizados === 0) {
+            alert('⚠️ No se encontraron filas válidas con Producto y Cantidad numérica en el archivo.');
+          } else {
+            alert(`✅ Archivo procesado con éxito:\n- ${nuevos} productos nuevos creados.\n- ${actualizados} productos actualizados con la cantidad vigente del archivo.`);
+          }
+        } catch (err) {
+          console.error(err);
+          alert('❌ Hubo un error al leer el archivo. Asegúrate de que sea un archivo Excel (.xlsx, .xls) o CSV válido.');
+        }
+      };
+      reader.readAsArrayBuffer(input.files[0]);
+    }
+
+    function registrarMovimiento(tipo, prod, cantidad, detallePersonalizado = '', destino = '') {
+      const ahora = new Date();
+      movimientos.push({
+        fecha: ahora.toLocaleString(),
+        fechaISO: obtenerFechaLocalISO(ahora),
+        timestamp: ahora.getTime(),
+        usuario: usuarioActivo.nombre,
+        idUsuario: usuarioActivo.id,
+        tipo: tipo,
+        idProducto: prod.id,
+        producto: prod.nombre,
+        cantidad: cantidad,
+        destino: destino,
+        detalle: detallePersonalizado || (tipo === 'ENTRADA' ? `+${cantidad}` : `-${cantidad}`)
+      });
+    }
+
+    // FUNCIONES DEL ESTIBADOR Y PANEL DE TURNOS (ABRIR, CONTINUAR, CERRAR)
+    function renderizarVistaEstibador() {
+      actualizarBannersAlerta();
+
+      document.getElementById('nombre-estibador-activo').innerText = usuarioActivo.nombre;
+      const estadoCabecera = document.getElementById('estado-cabecera-turno');
+      const horaCabecera = document.getElementById('hora-inicio-turno-estibador');
+      const controlesCabecera = document.getElementById('controles-cabecera-turno');
+      const panelTurno = document.getElementById('panel-gestion-turno-estibador');
+      const zonaOperaciones = document.getElementById('zona-operaciones-estibador');
+
+      if (!usuarioActivo.turnoAbierto) {
+        // ESTADO 1: NO TIENE TURNO ABIERTO -> MOSTRAR OPCIÓN DE ABRIR TURNO
+        estadoCabecera.innerText = '⚪ SIN TURNO ACTIVO';
+        estadoCabecera.className = 'text-xs font-bold uppercase tracking-wider text-slate-300';
+        horaCabecera.innerText = 'Debes abrir turno para registrar entradas y salidas.';
+
+        controlesCabecera.innerHTML = `
+          <button onclick="abrirTurnoEstibador()" class="w-full bg-green-500 hover:bg-green-600 text-white font-black py-2.5 rounded-xl text-sm shadow">
+            🟢 Abrir Turno Ahora
+          </button>
+        `;
+
+        panelTurno.classList.remove('hidden');
+        panelTurno.innerHTML = `
+          <div class="text-4xl mb-2">👷</div>
+          <h2 class="text-lg font-black text-slate-800 mb-1">Bienvenido, ${usuarioActivo.nombre}</h2>
+          <p class="text-xs text-slate-500 mb-4">Actualmente no tienes ningún turno abierto. Presiona el botón de abajo para iniciar tu turno de trabajo.</p>
+          <button onclick="abrirTurnoEstibador()" class="w-full bg-green-600 hover:bg-green-700 text-white font-black py-3.5 rounded-xl text-base shadow-lg">
+            🟢 Abrir Turno
+          </button>
+        `;
+        zonaOperaciones.classList.add('hidden');
+
+      } else if (esperandoConfirmacionContinuar) {
+        // ESTADO 2: TENÍA UN TURNO ABIERTO Y ACABA DE ENTRAR -> ELEGIR CONTINUAR O CERRAR TURNO
+        const fechaInicioStr = usuarioActivo.inicioTurnoTexto || (inicioTurno ? inicioTurno.toLocaleString() : '');
+        estadoCabecera.innerText = '🟢 TURNO ABIERTO EN CURSO';
+        estadoCabecera.className = 'text-xs font-bold uppercase tracking-wider text-green-300';
+        horaCabecera.innerText = `Abierto desde: ${fechaInicioStr}`;
+
+        controlesCabecera.innerHTML = `
+          <button onclick="continuarTurnoEstibador()" class="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 rounded-xl text-xs shadow">
+            ▶️ Continuar Turno
+          </button>
+          <button onclick="mostrarResumenTurno()" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-2 rounded-xl text-xs shadow">
+            🛑 Cerrar Turno
+          </button>
+        `;
+
+        panelTurno.classList.remove('hidden');
+        panelTurno.innerHTML = `
+          <div class="text-3xl mb-2">🔄</div>
+          <h2 class="text-lg font-black text-blue-900 mb-1">Tienes un Turno Abierto</h2>
+          <p class="text-xs text-slate-600 mb-4">Tu turno sigue activo desde <b>${fechaInicioStr}</b>.<br>No se cerrará hasta que presiones <b>Cerrar Turno</b>.</p>
+          <div class="flex flex-col gap-2.5">
+            <button onclick="continuarTurnoEstibador()" class="w-full bg-green-600 hover:bg-green-700 text-white font-black py-3.5 rounded-xl text-base shadow-lg">
+              ▶️ Continuar con mi Turno
+            </button>
+            <button onclick="mostrarResumenTurno()" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-black py-3 rounded-xl text-sm shadow">
+              🛑 Ir a Resumen y Cerrar Turno
+            </button>
+          </div>
+        `;
+        zonaOperaciones.classList.add('hidden');
+
+      } else {
+        // ESTADO 3: TURNO ABIERTO Y OPERANDO NORMALMENTE
+        const fechaInicioStr = usuarioActivo.inicioTurnoTexto || (inicioTurno ? inicioTurno.toLocaleString() : '');
+        estadoCabecera.innerText = '🟢 TURNO ACTIVO DE:';
+        estadoCabecera.className = 'text-xs font-bold uppercase tracking-wider text-green-300';
+        horaCabecera.innerText = `Inicio de turno: ${fechaInicioStr}`;
+
+        controlesCabecera.innerHTML = `
+          <button onclick="mostrarResumenTurno()" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-black py-2.5 rounded-xl text-sm shadow">
+            🛑 Cerrar Turno (Ver Resumen)
+          </button>
+        `;
+
+        panelTurno.classList.add('hidden');
+        zonaOperaciones.classList.remove('hidden');
+      }
+
+      // Renderizar lista de productos para dar salida
+      const filtro = (document.getElementById('buscador-estibador')?.value || '').toLowerCase();
+      const contenedor = document.getElementById('lista-productos-estibador');
+
+      const filtrados = productos.filter(p => 
+        p.nombre.toLowerCase().includes(filtro) || p.id.toLowerCase().includes(filtro)
+      );
+
+      contenedor.innerHTML = filtrados.map(p => {
+        const alarma = obtenerEstadoAlarma(p.cantidad);
+        const deshabilitado = p.cantidad <= 0 ? 'disabled' : '';
+        return `
+        <div class="border-2 rounded-xl p-4 flex flex-col gap-3 ${alarma.filaClase}">
+          <div class="flex justify-between items-start">
+            <div>
+              <span class="text-xs font-mono bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold">${p.id}</span>
+              <h3 class="font-bold text-lg mt-1">${p.nombre}</h3>
+              <div class="mt-1">${alarma.badge}</div>
+            </div>
+            <div class="text-right">
+              <span class="text-xs text-slate-500 block">Vigente:</span>
+              <span class="text-3xl font-black ${alarma.textoColor}">${p.cantidad}</span>
+            </div>
+          </div>
+
+          <div class="pt-3 border-t border-slate-200 flex flex-col gap-2">
+            <label class="text-xs font-bold text-slate-600">📍 Selecciona el destino de la salida:</label>
+            <select id="destino-salida-${p.id}" ${deshabilitado} class="border-2 border-slate-300 p-2.5 rounded-xl bg-white font-bold text-sm">
+              <option value="Área de Venta">🏪 Para Área de Venta</option>
+              <option value="Fuera de la Tienda">🚚 Para Fuera de la Tienda</option>
+            </select>
+
+            <div class="flex gap-2 items-center mt-1">
+              <input type="number" id="cant-salida-${p.id}" placeholder="Cantidad" min="1" max="${p.cantidad}" ${deshabilitado} class="border-2 border-slate-300 p-3 rounded-xl flex-1 text-lg font-bold text-center bg-white">
+              <button onclick="darSalida('${p.id}')" ${deshabilitado} class="${p.cantidad <= 0 ? 'bg-slate-300 text-slate-500' : 'bg-red-600 hover:bg-red-700 text-white'} font-bold px-5 py-3 rounded-xl text-base shadow">
+                Dar Salida
+              </button>
+            </div>
+          </div>
+        </div>
+      `}).join('');
+
+      renderizarHistorialEstibador();
+    }
+
+    // HISTORIAL FILTRADO POR FECHAS EN EL PERFIL DE ESTIBADORES
+    function renderizarHistorialEstibador() {
+      const contenedor = document.getElementById('lista-historial-estibador');
+      const contador = document.getElementById('contador-movs-estibador');
+      if (!contenedor) return;
+
+      const movsFiltrados = filtrarMovimientosPorFecha('estibador').slice().reverse();
+
+      if (movsFiltrados.length === 0) {
+        contador.innerText = `Mostrando 0 movimientos en los días seleccionados:`;
+        contenedor.innerHTML = `<div class="text-center text-slate-400 py-6 text-sm bg-slate-50 rounded-xl border">No hay movimientos registrados en estas fechas.</div>`;
+        return;
+      }
+
+      if (agruparHistorialEstibador) {
+        const grupos = agruparMovimientosPorProducto(movsFiltrados);
+        contador.innerText = `Mostrando ${grupos.length} producto(s) agrupados (${movsFiltrados.length} movimientos en total):`;
+
+        contenedor.innerHTML = grupos.map(g => {
+          const destinosHTML = Object.values(g.desgloseDestinos).map(d => {
+            const signo = d.tipo === 'ENTRADA' ? '+' : '-';
+            return `<div class="text-xs font-bold text-blue-800 mt-0.5">📍 ${d.destino}: ${signo}${d.cantidadTotal} uds <span class="font-normal text-slate-500">(${d.parciales.join(', ')})</span></div>`;
+          }).join('');
+
+          return `
+          <div class="p-3 rounded-xl border bg-slate-50 flex justify-between items-start gap-2">
+            <div class="flex-1">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="px-2 py-0.5 rounded text-[10px] font-black bg-indigo-100 text-indigo-800">${g.totalOperaciones} MOV(S)</span>
+                <span class="font-bold text-sm text-slate-800">${g.producto}</span>
+              </div>
+              <div class="text-[11px] text-slate-500 mt-1">
+                🕒 Último: ${g.ultimaFecha} | 👷 <b>${Array.from(g.usuarios).join(', ')}</b>
+              </div>
+              <div class="mt-1">${destinosHTML}</div>
+            </div>
+            <div class="flex flex-col items-end gap-1">
+              ${g.totalEntradas > 0 ? `<span class="font-black text-xs px-2.5 py-1 rounded-lg bg-green-600 text-white">+${g.totalEntradas} uds</span>` : ''}
+              ${g.totalSalidas > 0 ? `<span class="font-black text-xs px-2.5 py-1 rounded-lg bg-red-600 text-white">-${g.totalSalidas} uds</span>` : ''}
+            </div>
+          </div>
+        `}).join('');
+      } else {
+        contador.innerText = `Mostrando ${movsFiltrados.length} movimiento(s) individuales:`;
+        contenedor.innerHTML = movsFiltrados.map(m => {
+          const esEntrada = m.tipo === 'ENTRADA';
+          return `
+          <div class="p-3 rounded-xl border bg-slate-50 flex justify-between items-center gap-2">
+            <div class="flex-1">
+              <div class="flex items-center gap-1.5">
+                <span class="px-2 py-0.5 rounded text-[10px] font-black ${esEntrada ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${m.tipo}</span>
+                <span class="font-bold text-sm text-slate-800">${m.producto}</span>
+              </div>
+              <div class="text-xs text-slate-500 mt-1">
+                🕒 ${m.fecha} | 👷 <b>${m.usuario}</b>
+              </div>
+              ${m.destino ? `<div class="text-xs font-bold text-blue-700 mt-0.5">📍 ${m.destino}</div>` : ''}
+            </div>
+            <div class="text-right">
+              <span class="font-black text-sm px-2.5 py-1 rounded-lg ${esEntrada ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}">
+                ${m.detalle}
+              </span>
+            </div>
+          </div>
+        `}).join('');
+      }
+    }
+
+    function darSalida(idProd) {
+      if (!usuarioActivo || !usuarioActivo.turnoAbierto) {
+        return alert('⚠️ Primero debes ABRIR TURNO para poder dar salida a productos.');
+      }
+
+      const prod = productos.find(p => p.id === idProd);
+      const input = document.getElementById(`cant-salida-${idProd}`);
+      const selectDestino = document.getElementById(`destino-salida-${idProd}`);
+      
+      const cant = parseInt(input.value);
+      const destino = selectDestino.value;
+
+      if (!cant || cant <= 0) return alert('Ingresa una cantidad válida mayor a 0.');
+      if (cant > prod.cantidad) return alert(`❌ No puedes sacar ${cant}. Solo hay ${prod.cantidad} en existencia.`);
+
+      const ant = prod.cantidad;
+      prod.cantidad -= cant;
+      registrarMovimiento('SALIDA', prod, cant, `-${cant} (${ant} ➡️ ${prod.cantidad})`, destino);
+      guardarDatos();
+      alert(`✅ Salida registrada:\n-${cant} de "${prod.nombre}"\nDestino: ${destino}`);
+    }
+
+    // MODAL DE RESUMEN AL CIERRE DE TURNO (TODOS LOS PERFILES, AGRUPADO POR PRODUCTO)
+    function alternarVistaModalTurno() {
+      agruparModalTurno = !agruparModalTurno;
+      renderizarContenidoModalTurno();
+    }
+
+    function continuarTurnoDesdeModal() {
+      document.getElementById('modal-turno').classList.add('hidden');
+      if (usuarioActivo && usuarioActivo.rol === 'estibador') {
+        continuarTurnoEstibador();
+      }
+    }
+
+    function mostrarResumenTurno() {
+      agruparModalTurno = true;
+      renderizarContenidoModalTurno();
+      document.getElementById('modal-turno').classList.remove('hidden');
+    }
+
+    function renderizarContenidoModalTurno() {
+      const lista = document.getElementById('lista-movimientos-turno');
+      const btnToggle = document.getElementById('btn-toggle-modal-turno');
+      const msInicio = (usuarioActivo && usuarioActivo.inicioTurnoMs)
+        ? usuarioActivo.inicioTurnoMs
+        : (inicioTurno ? inicioTurno.getTime() : 0);
+
+      const movsTurno = movimientos.filter(m => (m.timestamp || 0) >= msInicio);
+
+      const horaInicioTexto = msInicio ? new Date(msInicio).toLocaleString() : '-';
+      document.getElementById('info-turno-cierre').innerText =
+        `Usuario: ${usuarioActivo ? usuarioActivo.nombre : ''} | Inicio: ${horaInicioTexto} | Ahora: ${new Date().toLocaleTimeString()}`;
+
+      btnToggle.innerText = agruparModalTurno ? '🕒 Ver cronológico' : '📦 Agrupar por producto';
+
+      if (movsTurno.length === 0) {
+        lista.innerHTML = `<p class="text-center text-slate-400 py-6">No se registraron movimientos durante este turno.</p>`;
+        return;
+      }
+
+      if (agruparModalTurno) {
+        const grupos = agruparMovimientosPorProducto(movsTurno);
+        lista.innerHTML = grupos.map(g => {
+          const desgloseHTML = Object.values(g.desgloseDestinos).map(d => {
+            const signo = d.tipo === 'ENTRADA' ? '+' : '-';
+            return `<div class="text-xs text-blue-800 font-bold mt-1">📍 ${d.destino}: ${signo}${d.cantidadTotal} uds <span class="font-normal text-slate-500">(${d.operaciones} mov: ${d.parciales.join(', ')})</span></div>`;
+          }).join('');
+
+          return `
+            <div class="bg-white border rounded-xl p-3 shadow-sm flex justify-between items-start gap-2">
+              <div class="flex-1">
+                <div class="flex items-center gap-1.5">
+                  <span class="bg-indigo-100 text-indigo-800 font-black px-2 py-0.5 rounded text-[10px]">${g.totalOperaciones} MOV(S)</span>
+                  <span class="font-bold text-slate-900">${g.producto}</span>
+                  <span class="text-xs text-slate-400">(${g.idProducto})</span>
+                </div>
+                ${desgloseHTML}
+                ${g.stockActual !== null ? `<div class="text-[11px] text-slate-500 mt-1">📦 Stock vigente en almacén: <b>${g.stockActual} uds</b></div>` : ''}
+              </div>
+              <div class="flex flex-col items-end gap-1">
+                ${g.totalEntradas > 0 ? `<span class="font-black px-2.5 py-1 rounded-lg text-xs bg-green-600 text-white">+${g.totalEntradas} uds</span>` : ''}
+                ${g.totalSalidas > 0 ? `<span class="font-black px-2.5 py-1 rounded-lg text-xs bg-red-600 text-white">-${g.totalSalidas} uds</span>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+      } else {
+        lista.innerHTML = movsTurno.map(m => `
+          <div class="bg-white border rounded-xl p-2.5 flex justify-between items-center">
+            <div>
+              Aquí tienes el código completo (`index.html`) actualizado y completo de principio a fin, incorporando el **sistema de persistencia de turnos para estibadores** junto con las mejoras anteriores:
+
+### Nuevas funciones implementadas
+
+1. **🔄 Control de Turnos Persistente para Estibadores (Abrir, Continuar y Cerrar):**
+   * **Persistencia en la nube (Firebase) y en el navegador:** Si un estibador refresca la página, cierra el navegador por accidente o sale momentáneamente de su cuenta, **su turno sigue abierto** desde la hora exacta en que lo inició.
+   * **Menú de Turno al entrar con PIN:**
+     * Si el estibador **no tiene turno activo**, el sistema le muestra la opción **🟢 Abrir Turno Ahora**.
+     * Si el estibador **ya tiene un turno abierto**, el sistema le muestra desde qué hora está activo y le da las opciones **▶️ Continuar con el Turno** o **🛑 Revisar Resumen y Cerrar Turno**.
+   * **Botón «⏸️ Salir (Mantener Turno)» vs «🛑 Cerrar Turno»:** Dentro de su panel, el estibador puede salir a la pantalla de inicio de sesión dejando su turno abierto (`⏸️ Salir`), o finalizar su jornada (`🛑 Cerrar Turno`). El turno **solo se cierra** cuando presiona el botón **Confirmar y Cerrar Turno** dentro del resumen.
+   * **Indicador visual:** En la lista de inicio de sesión y en el panel del Administrador aparece **`🟢 TURNO ABIERTO`** junto al nombre del estibador mientras no haya cerrado su turno.
+2. **📦 Agrupación de movimientos por producto al Cierre de Turno y en Historial (Todos los perfiles):**
+   * Al cerrar turno (o al consultar el historial), todas las entradas y salidas de un mismo producto se consolidan en una sola fila con el total sumado, el desglose por destino (`🏪 Área de Venta`, `🚚 Fuera de la Tienda`) y las cantidades parciales.
+3. **🗑️ Botón «Borrar Todo el Inventario» (Exclusivo Administrador):**
+   * Disponible únicamente en el panel de Administrador con doble confirmación de seguridad.
+
+---
+
+### Código completo (`index.html`)
+
+```html
+<!DOCTYPE html>
+<html lang="es">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Control de Almacén - En Línea</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <script src="[https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js](https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js)"></script>
     <!-- Conexión a Google Firebase -->
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    <script src="[https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js](https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js)"></script>
+    <script src="[https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js](https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js)"></script>
 </head>
 <body class="bg-slate-100 min-h-screen font-sans text-slate-800">
 
@@ -25,7 +1478,7 @@
             <p class="text-center text-slate-500 mb-6 text-sm">Selecciona tu usuario para entrar</p>
             
             <label class="block text-sm font-bold mb-2">Usuario:</label>
-            <select id="login-usuario" class="w-full p-3 border rounded-lg mb-4 bg-slate-50 text-lg"></select>
+            <select id="login-usuario" class="w-full p-3 border rounded-lg mb-4 bg-slate-50 text-base font-semibold"></select>
             
             <label class="block text-sm font-bold mb-2">PIN / Contraseña:</label>
             <input type="password" id="login-pin" placeholder="••••" class="w-full p-3 border rounded-lg mb-6 text-lg text-center tracking-widest">
@@ -36,14 +1489,30 @@
         </div>
     </div>
 
+    <!-- MODAL DE GESTIÓN DE TURNO AL ENTRAR (ABRIR / CONTINUAR / CERRAR) -->
+    <div id="modal-acceso-turno" class="hidden fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-2xl max-w-md w-full shadow-2xl border border-slate-200">
+            <h2 id="titulo-acceso-turno" class="text-xl font-bold text-center text-blue-800 mb-2">👷 Control de Turno</h2>
+            <p id="subtitulo-acceso-turno" class="text-center text-sm text-slate-600 mb-5"></p>
+            <div id="botones-acceso-turno" class="space-y-3"></div>
+        </div>
+    </div>
+
     <!-- PANTALLA 2: PANEL DE ADMINISTRADOR -->
     <div id="pantalla-admin" class="hidden max-w-6xl mx-auto p-4 md:p-6">
-        <div class="flex justify-between items-center bg-white p-4 rounded-xl shadow mb-6">
+        <div class="flex flex-wrap justify-between items-center gap-3 bg-white p-4 rounded-xl shadow mb-6">
             <div>
                 <h1 class="text-xl font-bold text-blue-800">Panel de Administrador</h1>
                 <p id="subtitulo-admin" class="text-sm text-slate-500">Gestión total del almacén</p>
             </div>
-            <button onclick="cerrarSesion()" class="bg-red-100 text-red-600 px-4 py-2 rounded-lg font-bold hover:bg-red-200">Cerrar Sesión</button>
+            <div class="flex items-center gap-2">
+                <button onclick="mostrarResumenTurno()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 px-4 py-2 rounded-lg font-bold text-sm shadow">
+                    📊 Resumen / Cerrar Turno
+                </button>
+                <button onclick="salirSinCerrarTurno()" class="bg-red-100 text-red-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-red-200">
+                    Cerrar Sesión
+                </button>
+            </div>
         </div>
 
         <!-- BANNER DE ALARMA VISUAL -->
@@ -106,14 +1575,19 @@
             </div>
         </div>
 
-        <!-- TABLA DE INVENTARIO ACTUAL -->
+        <!-- TABLA DE INVENTARIO ACTUAL (CON OPCIÓN DE BORRADO TOTAL SOLO ADMIN) -->
         <div class="bg-white p-6 rounded-xl shadow mb-6">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                 <div>
                     <h2 class="text-lg font-bold">📦 Inventario Actual</h2>
                     <p class="text-xs text-slate-500">Alarma visual: <span class="text-red-600 font-bold">Rojo = 0 (Agotado)</span> | <span class="text-amber-600 font-bold">Amarillo = 5 o menos (Por agotarse)</span></p>
                 </div>
-                <input type="text" id="buscador-admin" oninput="renderizarAdmin()" placeholder="🔍 Buscar producto o ID..." class="w-full md:w-80 p-2.5 border-2 border-blue-200 rounded-xl text-sm">
+                <div class="flex flex-col sm:flex-row w-full md:w-auto gap-2">
+                    <input type="text" id="buscador-admin" oninput="renderizarAdmin()" placeholder="🔍 Buscar producto o ID..." class="w-full md:w-72 p-2.5 border-2 border-blue-200 rounded-xl text-sm">
+                    <button onclick="eliminarTodoInventario()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow flex items-center justify-center gap-1.5 whitespace-nowrap">
+                        🗑️ Borrar Todo el Inventario
+                    </button>
+                </div>
             </div>
 
             <div class="overflow-x-auto">
@@ -132,14 +1606,13 @@
             </div>
         </div>
 
-        <!-- HISTORIAL DE MOVIMIENTOS (ADMIN CON FILTRO DE FECHAS) -->
+        <!-- HISTORIAL DE MOVIMIENTOS (ADMIN CON FILTRO DE FECHAS Y AGRUPACIÓN) -->
         <div class="bg-white p-6 rounded-xl shadow">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                 <div>
                     <h2 class="text-lg font-bold">📋 Historial de Movimientos</h2>
                     <p id="contador-movs-admin" class="text-xs text-slate-500">Mostrando todos los movimientos</p>
                 </div>
-                <!-- FILTRO DE FECHAS ADMIN -->
                 <div class="flex flex-wrap items-end gap-2 bg-slate-50 p-2.5 rounded-xl border text-xs w-full md:w-auto">
                     <div>
                         <label class="block font-bold text-slate-600 mb-1">📅 Desde:</label>
@@ -151,19 +1624,22 @@
                     </div>
                     <button onclick="filtrarHoy('admin')" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold px-3 py-2 rounded-lg">Hoy</button>
                     <button onclick="limpiarFiltroFechas('admin')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-3 py-2 rounded-lg">Ver Todos</button>
+                    <button id="btn-agrupar-admin" onclick="alternarAgrupacionHistorial('admin')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-2 rounded-lg shadow">
+                        📦 Agrupado por Producto
+                    </button>
                 </div>
             </div>
 
-            <div class="overflow-x-auto max-h-80">
+            <div class="overflow-x-auto max-h-96">
                 <table class="w-full text-left border-collapse text-sm">
                     <thead>
                         <tr class="bg-slate-100 border-b">
                             <th class="p-2">Fecha/Hora</th>
-                            <th class="p-2">Usuario</th>
+                            <th class="p-2">Usuario(s)</th>
                             <th class="p-2">Tipo</th>
                             <th class="p-2">Producto</th>
                             <th class="p-2">Destino / Origen</th>
-                            <th class="p-2">Detalle</th>
+                            <th class="p-2">Detalle / Total</th>
                         </tr>
                     </thead>
                     <tbody id="tabla-movimientos-admin"></tbody>
@@ -174,14 +1650,22 @@
 
     <!-- PANTALLA 3: VISTA DEL ESTIBADOR -->
     <div id="pantalla-estibador" class="hidden max-w-md mx-auto p-4 pb-12">
-        <div class="bg-blue-700 text-white p-4 rounded-2xl shadow-lg mb-4 flex justify-between items-center">
-            <div>
-                <p class="text-xs opacity-80">Turno Activo de:</p>
-                <h1 id="nombre-estibador-activo" class="text-xl font-bold"></h1>
+        <div class="bg-blue-700 text-white p-4 rounded-2xl shadow-lg mb-4">
+            <div class="flex justify-between items-start mb-3">
+                <div>
+                    <span class="inline-block bg-green-500 text-slate-900 font-black text-[10px] px-2 py-0.5 rounded-full uppercase">🟢 Turno Abierto</span>
+                    <h1 id="nombre-estibador-activo" class="text-xl font-bold mt-1"></h1>
+                    <p id="hora-inicio-estibador" class="text-xs text-blue-100"></p>
+                </div>
             </div>
-            <button onclick="mostrarResumenTurno()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-4 py-2 rounded-xl text-sm shadow">
-                🛑 Cerrar Turno
-            </button>
+            <div class="grid grid-cols-2 gap-2 pt-2 border-t border-blue-600">
+                <button onclick="salirSinCerrarTurno()" class="bg-blue-800 hover:bg-blue-900 text-white font-bold py-2.5 px-3 rounded-xl text-xs shadow">
+                    ⏸️ Salir (Dejar Turno Abierto)
+                </button>
+                <button onclick="mostrarResumenTurno()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-2.5 px-3 rounded-xl text-xs shadow">
+                    🛑 Cerrar Turno
+                </button>
+            </div>
         </div>
 
         <!-- BANNER ALERTA ESTIBADOR -->
@@ -209,12 +1693,11 @@
             <div id="lista-productos-estibador" class="space-y-3"></div>
         </div>
 
-        <!-- NUEVA SECCIÓN: HISTORIAL DE MOVIMIENTOS POR FECHA (ESTIBADOR) -->
+        <!-- HISTORIAL DE MOVIMIENTOS POR FECHA (ESTIBADOR) -->
         <div class="bg-white p-4 rounded-2xl shadow border-t-4 border-blue-600">
             <h2 class="font-bold text-base mb-1 text-blue-900">📋 Historial de Movimientos</h2>
             <p class="text-xs text-slate-500 mb-3">Selecciona una fecha o rango de días para consultar entradas y salidas:</p>
 
-            <!-- CONTROLES DE FECHA ESTIBADOR -->
             <div class="bg-slate-50 p-3 rounded-xl border mb-3 space-y-2">
                 <div class="grid grid-cols-2 gap-2 text-xs">
                     <div>
@@ -228,12 +1711,15 @@
                 </div>
                 <div class="flex gap-2 pt-1">
                     <button onclick="filtrarHoy('estibador')" class="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold py-2 rounded-lg text-xs">
-                        📅 Ver Movimientos de Hoy
+                        📅 Ver Hoy
                     </button>
                     <button onclick="limpiarFiltroFechas('estibador')" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 rounded-lg text-xs">
                         🔄 Ver Todos
                     </button>
                 </div>
+                <button id="btn-agrupar-estibador" onclick="alternarAgrupacionHistorial('estibador')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg text-xs shadow">
+                    📦 Vista: Agrupado por Producto (Cambiar a Detallado)
+                </button>
             </div>
 
             <p id="contador-movs-estibador" class="text-xs font-bold text-slate-500 mb-2"></p>
@@ -244,30 +1730,41 @@
     <!-- LISTA AUTOCOMPLETADO DE PRODUCTOS -->
     <datalist id="lista-nombres-productos"></datalist>
 
-    <!-- MODAL DE CIERRE DE TURNO -->
+    <!-- MODAL DE CIERRE DE TURNO (CON AGRUPACIÓN DE PRODUCTOS) -->
     <div id="modal-turno" class="hidden fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
-        <div class="bg-white p-6 rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col">
-            <h2 class="text-xl font-bold text-center mb-1">📊 Resumen del Turno</h2>
-            <p id="info-turno-cierre" class="text-center text-xs text-slate-500 mb-4"></p>
+        <div class="bg-white p-6 rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl">
+            <h2 class="text-xl font-bold text-center mb-1">📊 Resumen y Cierre del Turno</h2>
+            <p id="info-turno-cierre" class="text-center text-xs text-slate-500 mb-3"></p>
+
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="font-bold text-xs sm:text-sm text-slate-700">Movimientos consolidados por producto:</h3>
+                <button id="btn-toggle-modal-turno" onclick="alternarVistaModalTurno()" class="text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-bold px-2.5 py-1 rounded-lg">
+                    🕒 Ver cronológico
+                </button>
+            </div>
             
             <div class="overflow-y-auto flex-1 border rounded-xl p-3 mb-4 bg-slate-50">
-                <h3 class="font-bold text-sm mb-2">Movimientos registrados en este turno:</h3>
-                <div id="lista-movimientos-turno" class="space-y-2 text-sm"></div>
+                <div id="lista-movimientos-turno" class="space-y-2.5 text-sm"></div>
             </div>
 
             <div class="flex gap-3">
-                <button onclick="document.getElementById('modal-turno').classList.add('hidden')" class="flex-1 bg-slate-200 py-3 rounded-xl font-bold">Seguir Trabajando</button>
-                <button onclick="confirmarCierreTurno()" class="flex-1 bg-red-600 text-white py-3 rounded-xl font-bold">Confirmar y Salir</button>
+                <button onclick="document.getElementById('modal-turno').classList.add('hidden')" class="flex-1 bg-slate-200 hover:bg-slate-300 py-3 rounded-xl font-bold text-sm">
+                    Seguir en el Turno
+                </button>
+                <button onclick="confirmarCierreTurno()" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold text-sm shadow">
+                    🛑 Confirmar y Cerrar Turno
+                </button>
             </div>
         </div>
     </div>
 
     <script>
         const LIMITE_STOCK_BAJO = 5;
+        const CLAVE_SESION_LOCAL = 'almacen_sesion_activa_uid';
 
         // CONFIGURACIÓN DE TU BASE DE DATOS EN LA NUBE (FIREBASE)
         const firebaseConfig = {
-            databaseURL: "https://almacen-inventario-20028-default-rtdb.firebaseio.com/"
+            databaseURL: "[https://almacen-inventario-20028-default-rtdb.firebaseio.com/](https://almacen-inventario-20028-default-rtdb.firebaseio.com/)"
         };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
@@ -278,6 +1775,12 @@
         let movimientos = [];
         let usuarioActivo = null;
         let inicioTurno = null;
+        let sesionRestauradaVerificada = false;
+
+        // AGRUPACIÓN ACTIVA POR DEFECTO
+        let agruparHistorialAdmin = true;
+        let agruparHistorialEstibador = true;
+        let agruparModalTurno = true;
 
         // ESCUCHAR CAMBIOS EN LA NUBE EN TIEMPO REAL
         db.ref('almacen').on('value', (snapshot) => {
@@ -288,8 +1791,8 @@
                 movimientos = data.movimientos ? Object.values(data.movimientos) : [];
             } else {
                 usuarios = [
-                    { id: 1, nombre: 'Administrador', pin: '1234', rol: 'admin' },
-                    { id: 2, nombre: 'Juan (Estibador)', pin: '1111', rol: 'estibador' }
+                    { id: 1, nombre: 'Administrador', pin: '1234', rol: 'admin', turnoAbierto: false, inicioTurnoMs: null },
+                    { id: 2, nombre: 'Juan (Estibador)', pin: '1111', rol: 'estibador', turnoAbierto: false, inicioTurnoMs: null }
                 ];
                 productos = [
                     { id: 'PROD-1001', nombre: 'Saco de Cemento 50kg', cantidad: 120 },
@@ -303,13 +1806,31 @@
             document.getElementById('estado-nube').className = 'font-bold text-green-400';
 
             cargarLogin();
+
+            // Restaurar sesión activa automáticamente si el estibador no ha cerrado su turno
+            if (!sesionRestauradaVerificada && usuarios.length > 0) {
+                sesionRestauradaVerificada = true;
+                const idGuardado = localStorage.getItem(CLAVE_SESION_LOCAL);
+                if (idGuardado) {
+                    const userGuardado = usuarios.find(u => String(u.id) === String(idGuardado));
+                    if (userGuardado && userGuardado.rol === 'estibador' && userGuardado.turnoAbierto) {
+                        usuarioActivo = userGuardado;
+                        inicioTurno = new Date(userGuardado.inicioTurnoMs || Date.now());
+                        entrarPantallaEstibador();
+                        return;
+                    }
+                }
+            }
+
             if (usuarioActivo) {
+                const actualizado = usuarios.find(u => u.id === usuarioActivo.id);
+                if (actualizado) usuarioActivo = actualizado;
                 if (usuarioActivo.rol === 'admin') renderizarAdmin();
                 else renderizarVistaEstibador();
             }
         }, (error) => {
             console.error(error);
-            document.getElementById('estado-nube').innerHTML = '🔴 Error de permisos en Firebase (Revisa Reglas)';
+            document.getElementById('estado-nube').innerHTML = '🔴 Error de permisos en Firebase';
             document.getElementById('estado-nube').className = 'font-bold text-red-400';
         });
 
@@ -330,7 +1851,95 @@
             datalist.innerHTML = productos.map(p => `<option value="${p.nombre}">ID: ${p.id} (Stock: ${p.cantidad})</option>`).join('');
         }
 
-        // UTILIDADES PARA FILTRADO POR FECHAS
+        // AGRUPACIÓN DE MOVIMIENTOS POR PRODUCTO
+        function obtenerCantidadMovimiento(m) {
+            if (m.cantidad !== undefined && !isNaN(Number(m.cantidad))) return Math.abs(Number(m.cantidad));
+            if (m.detalle) {
+                const match = String(m.detalle).match(/[+-]?\d+/);
+                if (match) return Math.abs(parseInt(match[0], 10));
+            }
+            return 0;
+        }
+
+        function agruparMovimientosPorProducto(listaMovs) {
+            const mapa = new Map();
+
+            listaMovs.forEach(m => {
+                const clave = `${(m.idProducto || '').toLowerCase()}|${(m.producto || '').toLowerCase()}`;
+                const cant = obtenerCantidadMovimiento(m);
+                const esEntrada = m.tipo === 'ENTRADA';
+                const destinoNombre = m.destino || (esEntrada ? 'Ingreso' : 'Salida');
+
+                if (!mapa.has(clave)) {
+                    const prodCat = productos.find(p =>
+                        String(p.id).toLowerCase() === String(m.idProducto || '').toLowerCase() ||
+                        String(p.nombre).toLowerCase() === String(m.producto || '').toLowerCase()
+                    );
+                    mapa.set(clave, {
+                        idProducto: m.idProducto || '-',
+                        producto: m.producto || 'Producto',
+                        totalEntradas: 0,
+                        totalSalidas: 0,
+                        conteoEntradas: 0,
+                        conteoSalidas: 0,
+                        totalOperaciones: 0,
+                        ultimaFecha: m.fecha || '',
+                        ultimoTimestamp: m.timestamp || 0,
+                        usuarios: new Set(),
+                        desgloseDestinos: {},
+                        historialParcial: [],
+                        stockActual: prodCat ? prodCat.cantidad : null
+                    });
+                }
+
+                const g = mapa.get(clave);
+                g.totalOperaciones += 1;
+                if (m.usuario) g.usuarios.add(m.usuario);
+
+                if ((m.timestamp || 0) >= g.ultimoTimestamp) {
+                    g.ultimoTimestamp = m.timestamp || 0;
+                    g.ultimaFecha = m.fecha || g.ultimaFecha;
+                }
+
+                if (esEntrada) {
+                    g.totalEntradas += cant;
+                    g.conteoEntradas += 1;
+                    g.historialParcial.push(`+${cant}`);
+                } else {
+                    g.totalSalidas += cant;
+                    g.conteoSalidas += 1;
+                    g.historialParcial.push(`-${cant}`);
+                }
+
+                const claveDest = `${m.tipo}|${destinoNombre}`;
+                if (!g.desgloseDestinos[claveDest]) {
+                    g.desgloseDestinos[claveDest] = { tipo: m.tipo, destino: destinoNombre, cantidadTotal: 0, operaciones: 0, parciales: [] };
+                }
+                g.desgloseDestinos[claveDest].cantidadTotal += cant;
+                g.desgloseDestinos[claveDest].operaciones += 1;
+                g.desgloseDestinos[claveDest].parciales.push(esEntrada ? `+${cant}` : `-${cant}`);
+            });
+
+            return Array.from(mapa.values()).sort((a, b) => b.ultimoTimestamp - a.ultimoTimestamp);
+        }
+
+        function alternarAgrupacionHistorial(perfil) {
+            if (perfil === 'admin') {
+                agruparHistorialAdmin = !agruparHistorialAdmin;
+                const btn = document.getElementById('btn-agrupar-admin');
+                btn.innerText = agruparHistorialAdmin ? '📦 Agrupado por Producto' : '🕒 Vista Detallada';
+                renderizarAdmin();
+            } else {
+                agruparHistorialEstibador = !agruparHistorialEstibador;
+                const btn = document.getElementById('btn-agrupar-estibador');
+                btn.innerText = agruparHistorialEstibador
+                    ? '📦 Vista: Agrupado por Producto (Cambiar a Detallado)'
+                    : '🕒 Vista: Detallado uno por uno (Cambiar a Agrupado)';
+                renderizarHistorialEstibador();
+            }
+        }
+
+        // FILTRADO POR FECHAS
         function obtenerFechaLocalISO(dateObj = new Date()) {
             const anio = dateObj.getFullYear();
             const mes = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -341,9 +1950,7 @@
         function filtrarMovimientosPorFecha(prefijo) {
             const desdeVal = document.getElementById(`fecha-desde-${prefijo}`)?.value;
             const hastaVal = document.getElementById(`fecha-hasta-${prefijo}`)?.value;
-
-            let inicioMs = null;
-            let finMs = null;
+            let inicioMs = null, finMs = null;
 
             if (desdeVal) {
                 const [y, m, d] = desdeVal.split('-').map(Number);
@@ -355,14 +1962,12 @@
             }
 
             return movimientos.filter(m => {
-                // Si el movimiento tiene timestamp numérico lo usamos; si es antiguo intentamos convertir su fecha
                 let ts = m.timestamp;
                 if (!ts && m.fecha) {
                     const parsed = Date.parse(m.fecha);
                     if (!isNaN(parsed)) ts = parsed;
                 }
                 if (!ts) return true;
-
                 if (inicioMs !== null && ts < inicioMs) return false;
                 if (finMs !== null && ts > finMs) return false;
                 return true;
@@ -384,11 +1989,14 @@
             else renderizarHistorialEstibador();
         }
 
-        // LOGIN
+        // LOGIN Y CONTROL DE TURNOS PERSISTENTES
         function cargarLogin() {
             const select = document.getElementById('login-usuario');
             const valorActual = select.value;
-            select.innerHTML = usuarios.map(u => `<option value="${u.id}">${u.nombre} (${u.rol.toUpperCase()})</option>`).join('');
+            select.innerHTML = usuarios.map(u => {
+                const estadoTurno = (u.rol === 'estibador' && u.turnoAbierto) ? ' - 🟢 TURNO ABIERTO' : '';
+                return `<option value="${u.id}">${u.nombre} (${u.rol.toUpperCase()})${estadoTurno}</option>`;
+            }).join('');
             if (valorActual) select.value = valorActual;
             actualizarAutocompletado();
         }
@@ -403,25 +2011,100 @@
 
             usuarioActivo = user;
             document.getElementById('login-pin').value = '';
-            document.getElementById('pantalla-login').classList.add('hidden');
 
             if (user.rol === 'admin') {
+                inicioTurno = new Date(user.inicioTurnoMs || Date.now());
+                user.turnoAbierto = true;
+                user.inicioTurnoMs = inicioTurno.getTime();
+                guardarDatos();
+                document.getElementById('pantalla-login').classList.add('hidden');
                 document.getElementById('subtitulo-admin').innerText = `Sesión iniciada como: ${user.nombre}`;
                 document.getElementById('pantalla-admin').classList.remove('hidden');
                 renderizarAdmin();
             } else {
-                inicioTurno = new Date();
-                document.getElementById('nombre-estibador-activo').innerText = user.nombre;
-                document.getElementById('pantalla-estibador').classList.remove('hidden');
-                renderizarVistaEstibador();
+                mostrarOpcionesTurnoEstibador(user);
             }
         }
 
-        function cerrarSesion() {
+        function mostrarOpcionesTurnoEstibador(user) {
+            const modal = document.getElementById('modal-acceso-turno');
+            const titulo = document.getElementById('titulo-acceso-turno');
+            const subtitulo = document.getElementById('subtitulo-acceso-turno');
+            const contenedorBotones = document.getElementById('botones-acceso-turno');
+
+            titulo.innerText = `👷 Hola, ${user.nombre}`;
+
+            if (user.turnoAbierto && user.inicioTurnoMs) {
+                const fechaApertura = new Date(user.inicioTurnoMs).toLocaleString();
+                subtitulo.innerHTML = `Tienes un <b class="text-green-700">🟢 Turno Abierto</b> desde:<br><span class="font-bold text-slate-800">${fechaApertura}</span><br><span class="text-xs text-slate-500">El turno no se cierra hasta que presiones "Cerrar Turno".</span>`;
+                contenedorBotones.innerHTML = `
+                    <button onclick="continuarTurnoEstibador()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl text-base shadow">
+                        ▶️ Continuar con el Turno
+                    </button>
+                    <button onclick="irACerrarTurnoDesdeLogin()" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-3.5 rounded-xl text-base shadow">
+                        🛑 Cerrar Turno Actual
+                    </button>
+                    <button onclick="document.getElementById('modal-acceso-turno').classList.add('hidden')" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2.5 rounded-xl text-sm">
+                        ⬅️ Volver
+                    </button>
+                `;
+            } else {
+                subtitulo.innerHTML = `No tienes ningún turno abierto en este momento.<br>Para registrar entradas o salidas, abre tu turno:`;
+                contenedorBotones.innerHTML = `
+                    <button onclick="abrirNuevoTurnoEstibador()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl text-base shadow">
+                        🟢 Abrir Turno Ahora
+                    </button>
+                    <button onclick="document.getElementById('modal-acceso-turno').classList.add('hidden')" class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2.5 rounded-xl text-sm">
+                        ⬅️ Cancelar
+                    </button>
+                `;
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function abrirNuevoTurnoEstibador() {
+            const ahora = new Date();
+            usuarioActivo.turnoAbierto = true;
+            usuarioActivo.inicioTurnoMs = ahora.getTime();
+            inicioTurno = ahora;
+            localStorage.setItem(CLAVE_SESION_LOCAL, String(usuarioActivo.id));
+            guardarDatos();
+            document.getElementById('modal-acceso-turno').classList.add('hidden');
+            entrarPantallaEstibador();
+        }
+
+        function continuarTurnoEstibador() {
+            inicioTurno = new Date(usuarioActivo.inicioTurnoMs || Date.now());
+            localStorage.setItem(CLAVE_SESION_LOCAL, String(usuarioActivo.id));
+            document.getElementById('modal-acceso-turno').classList.add('hidden');
+            entrarPantallaEstibador();
+        }
+
+        function irACerrarTurnoDesdeLogin() {
+            inicioTurno = new Date(usuarioActivo.inicioTurnoMs || Date.now());
+            localStorage.setItem(CLAVE_SESION_LOCAL, String(usuarioActivo.id));
+            document.getElementById('modal-acceso-turno').classList.add('hidden');
+            entrarPantallaEstibador();
+            mostrarResumenTurno();
+        }
+
+        function entrarPantallaEstibador() {
+            document.getElementById('pantalla-login').classList.add('hidden');
+            document.getElementById('nombre-estibador-activo').innerText = usuarioActivo.nombre;
+            document.getElementById('hora-inicio-estibador').innerText = `Abierto desde: ${inicioTurno.toLocaleString()}`;
+            document.getElementById('pantalla-estibador').classList.remove('hidden');
+            renderizarVistaEstibador();
+        }
+
+        // SALIR A LA PANTALLA DE LOGIN SIN CERRAR EL TURNO
+        function salirSinCerrarTurno() {
+            localStorage.removeItem(CLAVE_SESION_LOCAL);
             usuarioActivo = null;
             document.getElementById('pantalla-admin').classList.add('hidden');
             document.getElementById('pantalla-estibador').classList.add('hidden');
             document.getElementById('modal-turno').classList.add('hidden');
+            document.getElementById('modal-acceso-turno').classList.add('hidden');
             document.getElementById('pantalla-login').classList.remove('hidden');
             cargarLogin();
         }
@@ -461,12 +2144,8 @@
             }
 
             let html = `<div class="font-bold text-sm mb-1">🔔 ALARMA DE INVENTARIO:</div>`;
-            if (agotados.length > 0) {
-                html += `<div>🚨 <b>Agotados (0 uds):</b> ${agotados.map(p => p.nombre).join(', ')}</div>`;
-            }
-            if (bajos.length > 0) {
-                html += `<div>⚠️ <b>Próximos a agotarse:</b> ${bajos.map(p => `${p.nombre} (${p.cantidad})`).join(', ')}</div>`;
-            }
+            if (agotados.length > 0) html += `<div>🚨 <b>Agotados (0 uds):</b> ${agotados.map(p => p.nombre).join(', ')}</div>`;
+            if (bajos.length > 0) html += `<div>⚠️ <b>Próximos a agotarse:</b> ${bajos.map(p => `${p.nombre} (${p.cantidad})`).join(', ')}</div>`;
 
             bannerAdmin.innerHTML = html;
             bannerAdmin.classList.remove('hidden');
@@ -474,32 +2153,40 @@
             bannerEstibador.classList.remove('hidden');
         }
 
+        function formatearBadgeDestino(destino, extra = '') {
+            if (destino === 'Área de Venta') return `<span class="inline-block bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-bold mr-1 mb-1">🏪 Área de Venta ${extra}</span>`;
+            if (destino === 'Fuera de la Tienda') return `<span class="inline-block bg-orange-100 text-orange-800 px-2 py-0.5 rounded text-xs font-bold mr-1 mb-1">🚚 Fuera de Tienda ${extra}</span>`;
+            if (destino) return `<span class="inline-block bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-xs font-semibold mr-1 mb-1">📍 ${destino} ${extra}</span>`;
+            return `<span class="text-slate-400 text-xs">-</span>`;
+        }
+
         // FUNCIONES DEL ADMINISTRADOR
         function renderizarAdmin() {
             actualizarBannersAlerta();
 
-            // 1. Renderizar Usuarios
+            // 1. Usuarios
             document.getElementById('lista-usuarios').innerHTML = usuarios.map(u => `
                 <div class="flex flex-wrap sm:flex-nowrap items-center gap-1.5 bg-slate-50 p-2 rounded-lg border text-xs">
-                    <input type="text" id="edit-user-nombre-${u.id}" value="${u.nombre}" class="border p-1.5 rounded flex-1 font-bold" title="Nombre">
-                    <input type="text" id="edit-user-pin-${u.id}" value="${u.pin}" class="border p-1.5 rounded w-16 text-center font-mono" title="PIN / Contraseña">
+                    <div class="flex-1 flex items-center gap-1">
+                        <input type="text" id="edit-user-nombre-${u.id}" value="${u.nombre}" class="border p-1.5 rounded w-full font-bold" title="Nombre">
+                        ${u.turnoAbierto && u.rol === 'estibador' ? `<span class="bg-green-100 text-green-800 px-1.5 py-0.5 rounded font-bold text-[10px] whitespace-nowrap">🟢 Activo</span>` : ''}
+                    </div>
+                    <input type="text" id="edit-user-pin-${u.id}" value="${u.pin}" class="border p-1.5 rounded w-16 text-center font-mono" title="PIN">
                     <select id="edit-user-rol-${u.id}" class="border p-1.5 rounded bg-white">
                         <option value="estibador" ${u.rol === 'estibador' ? 'selected' : ''}>Estibador</option>
                         <option value="admin" ${u.rol === 'admin' ? 'selected' : ''}>Admin</option>
                     </select>
-                    <button onclick="guardarEdicionUsuario(${u.id})" class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded font-bold" title="Guardar cambios">💾</button>
-                    <button onclick="eliminarUsuario(${u.id})" class="bg-red-100 hover:bg-red-200 text-red-600 px-2.5 py-1.5 rounded font-bold" title="Eliminar usuario">🗑️</button>
+                    <button onclick="guardarEdicionUsuario(${u.id})" class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded font-bold">💾</button>
+                    <button onclick="eliminarUsuario(${u.id})" class="bg-red-100 hover:bg-red-200 text-red-600 px-2.5 py-1.5 rounded font-bold">🗑️</button>
                 </div>
             `).join('');
 
-            // 2. Renderizar Inventario
+            // 2. Inventario
             const filtro = (document.getElementById('buscador-admin')?.value || '').toLowerCase();
-            const prodFiltrados = productos.filter(p => 
-                p.nombre.toLowerCase().includes(filtro) || p.id.toLowerCase().includes(filtro)
-            );
+            const prodFiltrados = productos.filter(p => p.nombre.toLowerCase().includes(filtro) || p.id.toLowerCase().includes(filtro));
 
             if (prodFiltrados.length === 0) {
-                document.getElementById('tabla-inventario-admin').innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">No hay productos registrados todavía. Agrega uno manualmente o sube un archivo Excel.</td></tr>`;
+                document.getElementById('tabla-inventario-admin').innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">No hay productos registrados todavía.</td></tr>`;
             } else {
                 document.getElementById('tabla-inventario-admin').innerHTML = prodFiltrados.map(p => {
                     const alarma = obtenerEstadoAlarma(p.cantidad);
@@ -511,47 +2198,69 @@
                         <td class="p-3">
                             <div class="flex items-center gap-2">
                                 <input type="number" id="edit-cant-${p.id}" value="${p.cantidad}" min="0" class="border-2 border-slate-300 p-1.5 rounded-lg w-24 text-center font-bold">
-                                <button onclick="modificarCantidadAdmin('${p.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow">
-                                    💾 Guardar
-                                </button>
+                                <button onclick="modificarCantidadAdmin('${p.id}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow">💾 Guardar</button>
                             </div>
                         </td>
                         <td class="p-3 text-right">
-                            <button onclick="eliminarProductoRaiz('${p.id}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow">
-                                🗑️ Eliminar
-                            </button>
+                            <button onclick="eliminarProductoRaiz('${p.id}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow">🗑️ Eliminar</button>
                         </td>
-                    </tr>
-                `}).join('');
+                    </tr>`;
+                }).join('');
             }
 
-            // 3. Renderizar Movimientos Filtrados por Fecha
+            // 3. Movimientos
             const movsFiltrados = filtrarMovimientosPorFecha('admin').slice().reverse();
-            document.getElementById('contador-movs-admin').innerText = `Mostrando ${movsFiltrados.length} movimiento(s) en las fechas seleccionadas`;
 
             if (movsFiltrados.length === 0) {
+                document.getElementById('contador-movs-admin').innerText = `Mostrando 0 movimientos en las fechas seleccionadas`;
                 document.getElementById('tabla-movimientos-admin').innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400">No hay movimientos registrados en las fechas seleccionadas.</td></tr>`;
-            } else {
-                document.getElementById('tabla-movimientos-admin').innerHTML = movsFiltrados.map(m => {
-                    let badgeDestino = `<span class="text-slate-400 text-xs">-</span>`;
-                    if (m.destino === 'Área de Venta') {
-                        badgeDestino = `<span class="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs font-bold">🏪 Área de Venta</span>`;
-                    } else if (m.destino === 'Fuera de la Tienda') {
-                        badgeDestino = `<span class="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs font-bold">🚚 Fuera de Tienda</span>`;
-                    } else if (m.destino) {
-                        badgeDestino = `<span class="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs">${m.destino}</span>`;
-                    }
+            } else if (agruparHistorialAdmin) {
+                const grupos = agruparMovimientosPorProducto(movsFiltrados);
+                document.getElementById('contador-movs-admin').innerText = `Mostrando ${grupos.length} producto(s) consolidados (de ${movsFiltrados.length} movimientos)`;
+
+                document.getElementById('tabla-movimientos-admin').innerHTML = grupos.map(g => {
+                    let badgeTipo = g.totalEntradas > 0 && g.totalSalidas > 0
+                        ? `<span class="px-2 py-1 rounded text-xs font-bold bg-indigo-100 text-indigo-800">ENTRADA / SALIDA</span>`
+                        : g.totalEntradas > 0
+                            ? `<span class="px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-700">ENTRADA (${g.conteoEntradas})</span>`
+                            : `<span class="px-2 py-1 rounded text-xs font-bold bg-red-100 text-red-700">SALIDA (${g.conteoSalidas})</span>`;
+
+                    const destinosHTML = Object.values(g.desgloseDestinos).map(d => {
+                        const signo = d.tipo === 'ENTRADA' ? '+' : '-';
+                        return formatearBadgeDestino(d.destino, `(${signo}${d.cantidadTotal} en ${d.operaciones} mov.)`);
+                    }).join(' ');
 
                     return `
+                    <tr class="border-b hover:bg-slate-50">
+                        <td class="p-2 text-slate-500 text-xs">
+                            <div>Último: ${g.ultimaFecha}</div>
+                            <span class="text-[11px] font-bold text-indigo-600">${g.totalOperaciones} mov(s) agrupados</span>
+                        </td>
+                        <td class="p-2 font-bold text-xs">${Array.from(g.usuarios).join(', ')}</td>
+                        <td class="p-2">${badgeTipo}</td>
+                        <td class="p-2 font-bold">${g.producto} <span class="text-xs font-normal text-slate-400">(${g.idProducto})</span></td>
+                        <td class="p-2">${destinosHTML}</td>
+                        <td class="p-2">
+                            <div class="flex flex-wrap items-center gap-1">
+                                ${g.totalEntradas > 0 ? `<span class="bg-green-600 text-white px-2.5 py-1 rounded-lg text-xs font-black">+${g.totalEntradas} uds</span>` : ''}
+                                ${g.totalSalidas > 0 ? `<span class="bg-red-600 text-white px-2.5 py-1 rounded-lg text-xs font-black">-${g.totalSalidas} uds</span>` : ''}
+                            </div>
+                            <div class="text-[11px] text-slate-500 mt-1">Parciales: ${g.historialParcial.join(', ')}</div>
+                        </td>
+                    </tr>`;
+                }).join('');
+            } else {
+                document.getElementById('contador-movs-admin').innerText = `Mostrando ${movsFiltrados.length} movimiento(s) individuales`;
+                document.getElementById('tabla-movimientos-admin').innerHTML = movsFiltrados.map(m => `
                     <tr class="border-b">
                         <td class="p-2 text-slate-500 text-xs">${m.fecha}</td>
                         <td class="p-2 font-bold">${m.usuario}</td>
                         <td class="p-2"><span class="px-2 py-1 rounded text-xs font-bold ${m.tipo === 'ENTRADA' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${m.tipo}</span></td>
                         <td class="p-2">${m.producto} <span class="text-xs text-slate-400">(${m.idProducto})</span></td>
-                        <td class="p-2">${badgeDestino}</td>
+                        <td class="p-2">${formatearBadgeDestino(m.destino)}</td>
                         <td class="p-2 font-bold">${m.detalle}</td>
                     </tr>
-                `}).join('');
+                `).join('');
             }
         }
 
@@ -562,7 +2271,7 @@
             const rol = document.getElementById('nuevo-rol').value;
             if (!nombre || !pin) return alert('Completa el nombre y el PIN');
             
-            usuarios.push({ id: Date.now(), nombre, pin, rol });
+            usuarios.push({ id: Date.now(), nombre, pin, rol, turnoAbierto: false, inicioTurnoMs: null });
             guardarDatos();
             document.getElementById('nuevo-nombre').value = '';
             document.getElementById('nuevo-pin').value = '';
@@ -575,21 +2284,19 @@
             const nuevoNombre = document.getElementById(`edit-user-nombre-${id}`).value.trim();
             const nuevoPin = document.getElementById(`edit-user-pin-${id}`).value.trim();
             const nuevoRol = document.getElementById(`edit-user-rol-${id}`).value;
-
             if (!nuevoNombre || !nuevoPin) return alert('El nombre y el PIN no pueden estar vacíos.');
 
             u.nombre = nuevoNombre;
             u.pin = nuevoPin;
             u.rol = nuevoRol;
             guardarDatos();
-            alert('✅ Parámetros del usuario actualizados.');
+            alert('✅ Usuario actualizado.');
         }
 
         function eliminarUsuario(id) {
             if (usuarios.length <= 1) return alert('No puedes eliminar al único usuario del sistema.');
             if (id === usuarioActivo.id) return alert('No puedes eliminar tu propio usuario mientras estás conectado.');
             if (!confirm('¿Seguro que deseas eliminar este usuario?')) return;
-
             usuarios = usuarios.filter(u => u.id !== id);
             guardarDatos();
         }
@@ -598,7 +2305,6 @@
         function modificarCantidadAdmin(idProd) {
             const prod = productos.find(p => p.id === idProd);
             const nuevaCant = parseInt(document.getElementById(`edit-cant-${idProd}`).value);
-
             if (isNaN(nuevaCant) || nuevaCant < 0) return alert('Ingresa una cantidad válida (0 o mayor).');
             
             const cantAnterior = prod.cantidad;
@@ -606,20 +2312,39 @@
             if (diferencia === 0) return alert('La cantidad es la misma.');
 
             prod.cantidad = nuevaCant;
-            const tipoMov = diferencia > 0 ? 'ENTRADA' : 'SALIDA';
-            registrarMovimiento(tipoMov, prod, Math.abs(diferencia), `Ajuste Admin (${cantAnterior} ➡️ ${nuevaCant})`, 'Ajuste Inventario');
-            
+            registrarMovimiento(diferencia > 0 ? 'ENTRADA' : 'SALIDA', prod, Math.abs(diferencia), `Ajuste Admin (${cantAnterior} ➡️ ${nuevaCant})`, 'Ajuste Inventario');
             guardarDatos();
             alert(`✅ Cantidad de "${prod.nombre}" actualizada a ${nuevaCant}.`);
         }
 
         function eliminarProductoRaiz(idProd) {
             const prod = productos.find(p => p.id === idProd);
-            if (!confirm(`⚠️ ¿Estás 100% seguro de eliminar "${prod.nombre}" (${prod.id}) de raíz del inventario?`)) return;
-
+            if (!confirm(`⚠️ ¿Estás seguro de eliminar "${prod.nombre}" (${prod.id}) de raíz?`)) return;
             productos = productos.filter(p => p.id !== idProd);
             registrarMovimiento('SALIDA', prod, prod.cantidad, `Eliminado de raíz (${prod.cantidad} ➡️ 0)`, 'Baja de Catálogo');
             guardarDatos();
+        }
+
+        // BORRAR TODO EL INVENTARIO (SOLO ADMIN)
+        function eliminarTodoInventario() {
+            if (!usuarioActivo || usuarioActivo.rol !== 'admin') {
+                return alert('⛔ Solo el Administrador puede borrar todo el inventario.');
+            }
+            if (!productos || productos.length === 0) {
+                return alert('⚠️ El inventario ya está vacío.');
+            }
+
+            const totalProductos = productos.length;
+            const totalUnidades = productos.reduce((acc, p) => acc + (Number(p.cantidad) || 0), 0);
+
+            if (!confirm(`⚠️ ¡ATENCIÓN ADMINISTRADOR!\n\nVas a BORRAR TODO EL INVENTARIO:\n• ${totalProductos} productos\n• ${totalUnidades} unidades totales\n\n¿Deseas continuar?`)) return;
+            if (!confirm(`🚨 CONFIRMACIÓN DEFINITIVA:\n\nSe eliminarán todos los productos del almacén y no se puede deshacer.\n¿Confirmas vaciar todo el inventario?`)) return;
+
+            productos = [];
+            registrarMovimiento('SALIDA', { id: 'TODOS', nombre: 'VACIADO TOTAL DEL INVENTARIO' }, totalUnidades, `Vaciado por Admin (${totalProductos} prods / ${totalUnidades} uds ➡️ 0)`, 'Vaciado Admin');
+            guardarDatos();
+            renderizarAdmin();
+            alert('✅ Todo el inventario ha sido eliminado correctamente.');
         }
 
         // AGREGAR PRODUCTO MANUALMENTE
@@ -629,25 +2354,21 @@
             const nombre = inputNombre.value.trim();
             const cant = parseInt(inputCant.value);
 
-            if (!nombre || isNaN(cant) || cant <= 0) {
-                return alert('Escribe el nombre del producto y una cantidad válida mayor a 0.');
-            }
+            if (!nombre || isNaN(cant) || cant <= 0) return alert('Escribe el nombre del producto y una cantidad válida mayor a 0.');
 
-            let prodExistente = productos.find(p => 
-                p.nombre.toLowerCase() === nombre.toLowerCase() || p.id.toLowerCase() === nombre.toLowerCase()
-            );
+            let prodExistente = productos.find(p => p.nombre.toLowerCase() === nombre.toLowerCase() || p.id.toLowerCase() === nombre.toLowerCase());
 
             if (prodExistente) {
                 const ant = prodExistente.cantidad;
                 prodExistente.cantidad += cant;
                 registrarMovimiento('ENTRADA', prodExistente, cant, `+${cant} (${ant} ➡️ ${prodExistente.cantidad})`, 'Ingreso Manual');
-                alert(`✅ Se sumaron +${cant} a "${prodExistente.nombre}". Total ahora: ${prodExistente.cantidad}`);
+                alert(`✅ Se sumaron +${cant} a "${prodExistente.nombre}". Total: ${prodExistente.cantidad}`);
             } else {
                 const nuevoId = generarNuevoId();
                 const nuevoProd = { id: nuevoId, nombre: nombre, cantidad: cant };
                 productos.push(nuevoProd);
                 registrarMovimiento('ENTRADA', nuevoProd, cant, `+${cant} Nuevo producto`, 'Ingreso Manual');
-                alert(`✅ Producto nuevo creado: "${nombre}" con ID ${nuevoId} (${cant} uds).`);
+                alert(`✅ Producto nuevo creado: "${nombre}" (${nuevoId}) con ${cant} uds.`);
             }
 
             inputNombre.value = '';
@@ -664,30 +2385,20 @@
             return 'PROD-' + (max + 1);
         }
 
-        // EXCEL: DESCARGAR PLANTILLA
+        // EXCEL: PLANTILLA Y CARGA
         function descargarPlantilla() {
-            let datosExcel = [];
-            if (productos && productos.length > 0) {
-                datosExcel = productos.map(p => ({
-                    ID: p.id,
-                    Producto: p.nombre,
-                    Cantidad: p.cantidad
-                }));
-            } else {
-                datosExcel = [
-                    { ID: "", Producto: "Ejemplo Producto Nuevo (Borra esta fila o edítala)", Cantidad: 10 }
-                ];
-            }
+            const datosExcel = (productos && productos.length > 0)
+                ? productos.map(p => ({ ID: p.id, Producto: p.nombre, Cantidad: p.cantidad }))
+                : [{ ID: "", Producto: "Ejemplo Producto Nuevo", Cantidad: 10 }];
             const ws = XLSX.utils.json_to_sheet(datosExcel, { header: ["ID", "Producto", "Cantidad"] });
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "Inventario");
             XLSX.writeFile(wb, "Inventario_Almacen.xlsx");
         }
 
-        // EXCEL: LECTOR INTELIGENTE
         function procesarExcel() {
             const input = document.getElementById('archivo-excel');
-            if (!input.files.length) return alert('Primero selecciona un archivo Excel o CSV.');
+            if (!input.files.length) return alert('Selecciona un archivo Excel o CSV.');
 
             const reader = new FileReader();
             reader.onload = function(e) {
@@ -696,13 +2407,10 @@
                     const workbook = XLSX.read(data, {type: 'array'});
                     const primeraHoja = workbook.SheetNames[0];
                     const matriz = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja], { header: 1, defval: "" });
-
                     const filasValidas = matriz.filter(f => f && f.some(celda => String(celda).trim() !== ""));
-                    if (filasValidas.length === 0) return alert('❌ El archivo parece estar vacío.');
+                    if (filasValidas.length === 0) return alert('❌ El archivo está vacío.');
 
-                    let colId = -1, colProd = -1, colCant = -1;
-                    let filaInicio = 0;
-
+                    let colId = -1, colProd = -1, colCant = -1, filaInicio = 0;
                     const primeraFila = filasValidas[0].map(c => String(c).toLowerCase().trim());
                     
                     primeraFila.forEach((texto, idx) => {
@@ -711,25 +2419,16 @@
                         else if (['cantidad', 'cant', 'cant.', 'existencia', 'existencias', 'stock', 'unidades', 'total'].includes(texto)) colCant = idx;
                     });
 
-                    if (colProd !== -1 || colCant !== -1 || colId !== -1) {
-                        filaInicio = 1;
-                    }
+                    if (colProd !== -1 || colCant !== -1 || colId !== -1) filaInicio = 1;
 
                     if (colProd === -1 || colCant === -1) {
-                        if (primeraFila.length >= 3) {
-                            colId = 0; colProd = 1; colCant = 2;
-                        } else if (primeraFila.length === 2) {
-                            colId = -1; colProd = 0; colCant = 1;
-                        } else {
-                            return alert('❌ Tu archivo debe tener al menos 2 columnas: Producto y Cantidad.');
-                        }
-                        if (isNaN(parseFloat(filasValidas[0][colCant]))) {
-                            filaInicio = 1;
-                        }
+                        if (primeraFila.length >= 3) { colId = 0; colProd = 1; colCant = 2; }
+                        else if (primeraFila.length === 2) { colId = -1; colProd = 0; colCant = 1; }
+                        else return alert('❌ El archivo debe tener al menos Producto y Cantidad.');
+                        if (isNaN(parseFloat(filasValidas[0][colCant]))) filaInicio = 1;
                     }
 
                     let actualizados = 0, nuevos = 0;
-
                     for (let i = filaInicio; i < filasValidas.length; i++) {
                         const fila = filasValidas[i];
                         const idFila = (colId !== -1 && fila[colId] !== undefined) ? String(fila[colId]).trim() : '';
@@ -739,28 +2438,18 @@
 
                         if ((!nombreFila && !idFila) || isNaN(cantFila) || cantFila < 0) continue;
 
-                        let prodExistente = null;
-                        if (idFila) {
-                            prodExistente = productos.find(p => String(p.id).toLowerCase() === idFila.toLowerCase());
-                        }
-                        if (!prodExistente && nombreFila) {
-                            prodExistente = productos.find(p => String(p.nombre).toLowerCase() === nombreFila.toLowerCase());
-                        }
+                        let prodExistente = idFila ? productos.find(p => String(p.id).toLowerCase() === idFila.toLowerCase()) : null;
+                        if (!prodExistente && nombreFila) prodExistente = productos.find(p => String(p.nombre).toLowerCase() === nombreFila.toLowerCase());
 
                         if (prodExistente) {
-                            const cantAnterior = prodExistente.cantidad;
+                            const cantAnt = prodExistente.cantidad;
                             if (nombreFila) prodExistente.nombre = nombreFila;
                             prodExistente.cantidad = cantFila;
                             actualizados++;
-
-                            const dif = cantFila - cantAnterior;
-                            if (dif !== 0) {
-                                const tipo = dif > 0 ? 'ENTRADA' : 'SALIDA';
-                                registrarMovimiento(tipo, prodExistente, Math.abs(dif), `Excel (${cantAnterior} ➡️ ${cantFila})`, 'Carga de Archivo');
-                            }
+                            const dif = cantFila - cantAnt;
+                            if (dif !== 0) registrarMovimiento(dif > 0 ? 'ENTRADA' : 'SALIDA', prodExistente, Math.abs(dif), `Excel (${cantAnt} ➡️ ${cantFila})`, 'Carga de Archivo');
                         } else if (nombreFila) {
-                            const nuevoId = idFila || generarNuevoId();
-                            const nuevoProd = { id: nuevoId, nombre: nombreFila, cantidad: cantFila };
+                            const nuevoProd = { id: idFila || generarNuevoId(), nombre: nombreFila, cantidad: cantFila };
                             productos.push(nuevoProd);
                             nuevos++;
                             registrarMovimiento('ENTRADA', nuevoProd, cantFila, `+${cantFila} Nuevo`, 'Carga de Archivo');
@@ -770,15 +2459,10 @@
                     guardarDatos();
                     renderizarAdmin();
                     input.value = '';
-
-                    if (nuevos === 0 && actualizados === 0) {
-                        alert('⚠️ No se encontraron filas válidas con Producto y Cantidad numérica en el archivo.');
-                    } else {
-                        alert(`✅ Archivo procesado con éxito:\n- ${nuevos} productos nuevos creados.\n- ${actualizados} productos actualizados con la cantidad vigente del archivo.`);
-                    }
+                    alert(`✅ Archivo procesado:\n- ${nuevos} nuevos.\n- ${actualizados} actualizados.`);
                 } catch (err) {
                     console.error(err);
-                    alert('❌ Hubo un error al leer el archivo. Asegúrate de que sea un archivo Excel (.xlsx, .xls) o CSV válido.');
+                    alert('❌ Error al leer el archivo Excel/CSV.');
                 }
             };
             reader.readAsArrayBuffer(input.files[0]);
@@ -800,16 +2484,12 @@
             });
         }
 
-        // FUNCIONES DEL ESTIBADOR
+        // VISTA DEL ESTIBADOR
         function renderizarVistaEstibador() {
             actualizarBannersAlerta();
-
             const filtro = document.getElementById('buscador-estibador').value.toLowerCase();
             const contenedor = document.getElementById('lista-productos-estibador');
-
-            const filtrados = productos.filter(p => 
-                p.nombre.toLowerCase().includes(filtro) || p.id.toLowerCase().includes(filtro)
-            );
+            const filtrados = productos.filter(p => p.nombre.toLowerCase().includes(filtro) || p.id.toLowerCase().includes(filtro));
 
             contenedor.innerHTML = filtrados.map(p => {
                 const alarma = obtenerEstadoAlarma(p.cantidad);
@@ -827,14 +2507,12 @@
                             <span class="text-3xl font-black ${alarma.textoColor}">${p.cantidad}</span>
                         </div>
                     </div>
-
                     <div class="pt-3 border-t border-slate-200 flex flex-col gap-2">
                         <label class="text-xs font-bold text-slate-600">📍 Selecciona el destino de la salida:</label>
                         <select id="destino-salida-${p.id}" ${deshabilitado} class="border-2 border-slate-300 p-2.5 rounded-xl bg-white font-bold text-sm">
                             <option value="Área de Venta">🏪 Para Área de Venta</option>
                             <option value="Fuera de la Tienda">🚚 Para Fuera de la Tienda</option>
                         </select>
-
                         <div class="flex gap-2 items-center mt-1">
                             <input type="number" id="cant-salida-${p.id}" placeholder="Cantidad" min="1" max="${p.cantidad}" ${deshabilitado} class="border-2 border-slate-300 p-3 rounded-xl flex-1 text-lg font-bold text-center bg-white">
                             <button onclick="darSalida('${p.id}')" ${deshabilitado} class="${p.cantidad <= 0 ? 'bg-slate-300 text-slate-500' : 'bg-red-600 hover:bg-red-700 text-white'} font-bold px-5 py-3 rounded-xl text-base shadow">
@@ -842,54 +2520,77 @@
                             </button>
                         </div>
                     </div>
-                </div>
-            `}).join('');
+                </div>`;
+            }).join('');
 
             renderizarHistorialEstibador();
         }
 
-        // HISTORIAL FILTRADO POR FECHAS EN EL PERFIL DE ESTIBADORES
         function renderizarHistorialEstibador() {
             const contenedor = document.getElementById('lista-historial-estibador');
             const contador = document.getElementById('contador-movs-estibador');
             if (!contenedor) return;
 
             const movsFiltrados = filtrarMovimientosPorFecha('estibador').slice().reverse();
-            contador.innerText = `Mostrando ${movsFiltrados.length} movimiento(s) en los días seleccionados:`;
 
             if (movsFiltrados.length === 0) {
+                contador.innerText = `Mostrando 0 movimientos en los días seleccionados:`;
                 contenedor.innerHTML = `<div class="text-center text-slate-400 py-6 text-sm bg-slate-50 rounded-xl border">No hay movimientos registrados en estas fechas.</div>`;
                 return;
             }
 
-            contenedor.innerHTML = movsFiltrados.map(m => {
-                const esEntrada = m.tipo === 'ENTRADA';
-                return `
-                <div class="p-3 rounded-xl border bg-slate-50 flex justify-between items-center gap-2">
-                    <div class="flex-1">
-                        <div class="flex items-center gap-1.5">
-                            <span class="px-2 py-0.5 rounded text-[10px] font-black ${esEntrada ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${m.tipo}</span>
-                            <span class="font-bold text-sm text-slate-800">${m.producto}</span>
+            if (agruparHistorialEstibador) {
+                const grupos = agruparMovimientosPorProducto(movsFiltrados);
+                contador.innerText = `Mostrando ${grupos.length} producto(s) agrupados (${movsFiltrados.length} movimientos):`;
+
+                contenedor.innerHTML = grupos.map(g => {
+                    const destinosHTML = Object.values(g.desgloseDestinos).map(d => {
+                        const signo = d.tipo === 'ENTRADA' ? '+' : '-';
+                        return `<div class="text-xs font-bold text-blue-800 mt-0.5">📍 ${d.destino}: ${signo}${d.cantidadTotal} uds <span class="font-normal text-slate-500">(${d.parciales.join(', ')})</span></div>`;
+                    }).join('');
+
+                    return `
+                    <div class="p-3 rounded-xl border bg-slate-50 flex justify-between items-start gap-2">
+                        <div class="flex-1">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-black bg-indigo-100 text-indigo-800">${g.totalOperaciones} MOV(S)</span>
+                                <span class="font-bold text-sm text-slate-800">${g.producto}</span>
+                            </div>
+                            <div class="text-[11px] text-slate-500 mt-1">🕒 Último: ${g.ultimaFecha} | 👷 <b>${Array.from(g.usuarios).join(', ')}</b></div>
+                            <div class="mt-1">${destinosHTML}</div>
                         </div>
-                        <div class="text-xs text-slate-500 mt-1">
-                            🕒 ${m.fecha} | 👷 <b>${m.usuario}</b>
+                        <div class="flex flex-col items-end gap-1">
+                            ${g.totalEntradas > 0 ? `<span class="font-black text-xs px-2.5 py-1 rounded-lg bg-green-600 text-white">+${g.totalEntradas} uds</span>` : ''}
+                            ${g.totalSalidas > 0 ? `<span class="font-black text-xs px-2.5 py-1 rounded-lg bg-red-600 text-white">-${g.totalSalidas} uds</span>` : ''}
                         </div>
-                        ${m.destino ? `<div class="text-xs font-bold text-blue-700 mt-0.5">📍 ${m.destino}</div>` : ''}
-                    </div>
-                    <div class="text-right">
-                        <span class="font-black text-sm px-2.5 py-1 rounded-lg ${esEntrada ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}">
-                            ${m.detalle}
-                        </span>
-                    </div>
-                </div>
-            `}).join('');
+                    </div>`;
+                }).join('');
+            } else {
+                contador.innerText = `Mostrando ${movsFiltrados.length} movimiento(s) individuales:`;
+                contenedor.innerHTML = movsFiltrados.map(m => {
+                    const esEntrada = m.tipo === 'ENTRADA';
+                    return `
+                    <div class="p-3 rounded-xl border bg-slate-50 flex justify-between items-center gap-2">
+                        <div class="flex-1">
+                            <div class="flex items-center gap-1.5">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-black ${esEntrada ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${m.tipo}</span>
+                                <span class="font-bold text-sm text-slate-800">${m.producto}</span>
+                            </div>
+                            <div class="text-xs text-slate-500 mt-1">🕒 ${m.fecha} | 👷 <b>${m.usuario}</b></div>
+                            ${m.destino ? `<div class="text-xs font-bold text-blue-700 mt-0.5">📍 ${m.destino}</div>` : ''}
+                        </div>
+                        <div class="text-right">
+                            <span class="font-black text-sm px-2.5 py-1 rounded-lg ${esEntrada ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}">${m.detalle}</span>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
         }
 
         function darSalida(idProd) {
             const prod = productos.find(p => p.id === idProd);
             const input = document.getElementById(`cant-salida-${idProd}`);
             const selectDestino = document.getElementById(`destino-salida-${idProd}`);
-            
             const cant = parseInt(input.value);
             const destino = selectDestino.value;
 
@@ -903,36 +2604,96 @@
             alert(`✅ Salida registrada:\n-${cant} de "${prod.nombre}"\nDestino: ${destino}`);
         }
 
-        function mostrarResumenTurno() {
-            const modal = document.getElementById('modal-turno');
-            const lista = document.getElementById('lista-movimientos-turno');
-            
-            const movsTurno = movimientos.filter(m => m.timestamp >= inicioTurno.getTime());
+        // MODAL DE RESUMEN Y CIERRE DE TURNO (CONSOLIDADO POR PRODUCTO)
+        function alternarVistaModalTurno() {
+            agruparModalTurno = !agruparModalTurno;
+            renderizarContenidoModalTurno();
+        }
 
-            document.getElementById('info-turno-cierre').innerText = `Inicio: ${inicioTurno.toLocaleTimeString()} | Cierre: ${new Date().toLocaleTimeString()}`;
+        function mostrarResumenTurno() {
+            agruparModalTurno = true;
+            renderizarContenidoModalTurno();
+            document.getElementById('modal-turno').classList.remove('hidden');
+        }
+
+        function renderizarContenidoModalTurno() {
+            const lista = document.getElementById('lista-movimientos-turno');
+            const btnToggle = document.getElementById('btn-toggle-modal-turno');
+            const tiempoInicio = (usuarioActivo && usuarioActivo.inicioTurnoMs)
+                ? usuarioActivo.inicioTurnoMs
+                : (inicioTurno ? inicioTurno.getTime() : 0);
+
+            const movsTurno = movimientos.filter(m => (m.timestamp || 0) >= tiempoInicio);
+            const horaInicioTexto = tiempoInicio ? new Date(tiempoInicio).toLocaleString() : '-';
+
+            document.getElementById('info-turno-cierre').innerText = `Usuario: ${usuarioActivo ? usuarioActivo.nombre : ''} | Apertura: ${horaInicioTexto} | Ahora: ${new Date().toLocaleTimeString()}`;
+
+            if (btnToggle) {
+                btnToggle.innerText = agruparModalTurno ? '🕒 Ver cronológico' : '📦 Agrupar por producto';
+            }
 
             if (movsTurno.length === 0) {
-                lista.innerHTML = `<p class="text-center text-slate-400 py-4">No hubo movimientos durante este turno.</p>`;
+                lista.innerHTML = `<p class="text-center text-slate-400 py-6">No se registraron movimientos durante este turno.</p>`;
+                return;
+            }
+
+            if (agruparModalTurno) {
+                const grupos = agruparMovimientosPorProducto(movsTurno);
+                lista.innerHTML = grupos.map(g => {
+                    const desgloseHTML = Object.values(g.desgloseDestinos).map(d => {
+                        const signo = d.tipo === 'ENTRADA' ? '+' : '-';
+                        return `<div class="text-xs text-slate-700 mt-1">📍 <b>${d.destino}:</b> <span class="font-bold">${signo}${d.cantidadTotal} uds</span> <span class="text-slate-400">(${d.operaciones} mov: ${d.parciales.join(', ')})</span></div>`;
+                    }).join('');
+
+                    return `
+                    <div class="bg-white border rounded-xl p-3 shadow-sm">
+                        <div class="flex justify-between items-start gap-2 border-b pb-2">
+                            <div>
+                                <span class="font-bold text-slate-800 block">${g.producto} <span class="text-xs font-mono text-slate-400">(${g.idProducto})</span></span>
+                                <span class="text-[11px] text-indigo-700 font-bold">${g.totalOperaciones} movimiento(s) en el turno | Por: ${Array.from(g.usuarios).join(', ')}</span>
+                            </div>
+                            <div class="flex flex-col items-end gap-1">
+                                ${g.totalEntradas > 0 ? `<span class="bg-green-600 text-white font-black px-2.5 py-0.5 rounded-lg text-xs">Total Entrada: +${g.totalEntradas}</span>` : ''}
+                                ${g.totalSalidas > 0 ? `<span class="bg-red-600 text-white font-black px-2.5 py-0.5 rounded-lg text-xs">Total Salida: -${g.totalSalidas}</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="pt-1.5">
+                            ${desgloseHTML}
+                            ${g.stockActual !== null ? `<div class="text-[11px] text-slate-500 mt-1.5 font-semibold">📦 Stock vigente en almacén: <b>${g.stockActual} uds</b></div>` : ''}
+                        </div>
+                    </div>`;
+                }).join('');
             } else {
-                lista.innerHTML = movsTurno.map(m => `
-                    <div class="flex justify-between items-center border-b pb-2">
+                lista.innerHTML = movsTurno.slice().reverse().map(m => `
+                    <div class="flex justify-between items-center bg-white border rounded-xl p-2.5">
                         <div>
                             <span class="font-bold block">${m.producto}</span>
                             <span class="text-xs text-slate-500">${m.fecha} - Por: ${m.usuario}</span>
-                            ${m.destino ? `<span class="inline-block mt-0.5 text-xs font-bold text-blue-700">📍 ${m.destino}</span>` : ''}
+                            ${m.destino ? `<span class="block mt-0.5 text-xs font-bold text-blue-700">📍 ${m.destino}</span>` : ''}
                         </div>
-                        <span class="font-bold px-2 py-1 rounded text-xs ${m.tipo === 'ENTRADA' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                        <span class="font-bold px-2.5 py-1 rounded text-xs ${m.tipo === 'ENTRADA' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
                             ${m.detalle}
                         </span>
                     </div>
                 `).join('');
             }
-            modal.classList.remove('hidden');
         }
 
         function confirmarCierreTurno() {
+            if (!confirm('🛑 ¿Confirmas que deseas CERRAR EL TURNO definitivamente?')) return;
+
+            if (usuarioActivo) {
+                const u = usuarios.find(user => user.id === usuarioActivo.id);
+                if (u) {
+                    u.turnoAbierto = false;
+                    u.inicioTurnoMs = null;
+                }
+            }
+
+            localStorage.removeItem(CLAVE_SESION_LOCAL);
+            guardarDatos();
             alert('✅ Turno cerrado correctamente. ¡Buen descanso!');
-            cerrarSesion();
+            salirSinCerrarTurno();
         }
     </script>
 </body>
